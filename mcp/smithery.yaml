@@ -1,0 +1,25 @@
+# Smithery configuration for warden402-mcp
+# Docs: https://smithery.ai/docs
+#
+# If Smithery scans the repo root rather than this subfolder, point it at the
+# `mcp` directory (or copy this file to the repo root).
+
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    required: []
+    properties:
+      wardenApiUrl:
+        type: string
+        title: Warden API URL
+        default: https://warden402.xyz/api
+        description: Override the Warden API base (optional). No keys required.
+  commandFunction: |-
+    (config) => ({
+      command: "npx",
+      args: ["-y", "warden402-mcp"],
+      env: {
+        ...(config.wardenApiUrl ? { WARDEN_API_URL: config.wardenApiUrl } : {})
+      }
+    })
