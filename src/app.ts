@@ -4,11 +4,16 @@ import { guardToken } from "./routes/guardToken.js";
 import { guardTx } from "./routes/guardTx.js";
 import { guardAddress } from "./routes/guardAddress.js";
 import { trackRecord } from "./routes/trackRecord.js";
+import { guardPaymentGate } from "./x402/gate.js";
 
 /** Warden Hono app — hem lokal node sunucusu hem Vercel serverless tarafından kullanılır. */
 export const app = new Hono();
 
 app.use("*", cors());
+
+// x402 payment gate on the paid guard endpoints (free + unlimited until
+// PAYMENTS_ENABLED=true with CDP keys; see src/x402/config.ts).
+app.use("/guard/*", guardPaymentGate);
 
 app.get("/", (c) =>
   c.json({

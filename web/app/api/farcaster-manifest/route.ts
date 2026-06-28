@@ -15,9 +15,15 @@ export function GET() {
   const SITE_URL = getSiteUrl();
   return Response.json({
     accountAssociation: {
-      header: process.env.FARCASTER_HEADER || "",
-      payload: process.env.FARCASTER_PAYLOAD || "",
-      signature: process.env.FARCASTER_SIGNATURE || "",
+      // Domain-bound ownership proof for warden402.xyz (FID 287286).
+      // Env vars override if you deploy to a different domain.
+      header:
+        process.env.FARCASTER_HEADER ||
+        "eyJmaWQiOjI4NzI4NiwidHlwZSI6ImN1c3RvZHkiLCJrZXkiOiIweDg0ODhiNkY5NThiMTVlQzQxZjZiNmMyRWY4MkFEQzEwNTc4NTU5NjkifQ",
+      payload: process.env.FARCASTER_PAYLOAD || "eyJkb21haW4iOiJ3YXJkZW40MDIueHl6In0",
+      signature:
+        process.env.FARCASTER_SIGNATURE ||
+        "PGHVeNyYvLUQSzStMw4s7owAyFhfIMpgV4iEWEXBSJ49ttcpm4mvNEfDBbWD6nRj/ltyypdsnJ06Rf1kTmzQYRw=",
     },
     miniapp: {
       version: "1",
