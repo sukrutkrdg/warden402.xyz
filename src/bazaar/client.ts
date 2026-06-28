@@ -63,7 +63,7 @@ export async function bazaarGet<T = unknown>(
       const result: BazaarResult<T> = {
         ok: false,
         status: 402,
-        error: "Bazaar 402 — internal-auth devrede değil (BAZAAR_INTERNAL_SECRET?)",
+        error: "Bazaar 402 — internal-auth not active (BAZAAR_INTERNAL_SECRET?)",
       };
       cache.set(key, { at: Date.now(), value: result });
       return result;

@@ -30,17 +30,17 @@ export async function buildSummary(
       model: MODEL,
       max_tokens: 160,
       system:
-        "Sen bir on-chain güvenlik açıklayıcısısın. Sana verilen KARARI ve sinyalleri " +
-        "1-2 cümlede sade dille gerekçelendir. Kararı DEĞİŞTİRME, yeni risk UYDURMA, " +
-        "yalnızca verilen sinyallere dayan. Türkçe yaz.",
+        "You are an on-chain security explainer. Justify the GIVEN decision and signals " +
+        "in 1-2 plain-language sentences. Do NOT change the decision, do NOT invent new " +
+        "risks, rely only on the provided signals. Write in English.",
       messages: [
         {
           role: "user",
           content:
-            `Karar: ${decided.decision.toUpperCase()} (risk ${decided.riskScore}/100, güven ${decided.confidence}).\n` +
-            `Sinyaller:\n${facts}\n` +
-            (unknowns.length ? `Alınamayan sinyaller: ${unknowns.join(", ")}\n` : "") +
-            `Bunu kısa, net bir gerekçeyle özetle.`,
+            `Decision: ${decided.decision.toUpperCase()} (risk ${decided.riskScore}/100, confidence ${decided.confidence}).\n` +
+            `Signals:\n${facts}\n` +
+            (unknowns.length ? `Unavailable signals: ${unknowns.join(", ")}\n` : "") +
+            `Summarize this with a short, clear rationale.`,
         },
       ],
     });
@@ -56,15 +56,15 @@ export function deterministicSummary(decided: Decided, signals: SignalResult[]):
   const fired = signals.filter((s) => s.status === "fail" || s.status === "warn");
   const head =
     decided.decision === "block"
-      ? "İşlem engellendi"
+      ? "Blocked"
       : decided.decision === "review"
-      ? "Manuel inceleme öneriliyor"
-      : "Bilinen risk bulunamadı";
+      ? "Review recommended"
+      : "No known risk found";
   if (fired.length === 0) {
     return decided.degraded
-      ? `${head}: bazı güvenlik sinyalleri alınamadı, temkinli ol.`
-      : `${head}: tüm temel güvenlik sinyalleri temiz (risk ${decided.riskScore}/100).`;
+      ? `${head}: some security signals couldn't be fetched — proceed with caution.`
+      : `${head}: all core security signals are clean (risk ${decided.riskScore}/100).`;
   }
   const why = fired.map((s) => s.detail ?? s.source).slice(0, 3).join("; ");
-  return `${head} (risk ${decided.riskScore}/100). Öne çıkanlar: ${why}.`;
+  return `${head} (risk ${decided.riskScore}/100). Highlights: ${why}.`;
 }

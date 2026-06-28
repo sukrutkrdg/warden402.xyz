@@ -34,17 +34,17 @@ export function approvalSignal(decoded: DecodedCall): SignalResult {
   const reasonCodes: ReasonCode[] = [];
   let status: SignalResult["status"] = "ok";
   let score = 0;
-  let detail = `çağrı: ${decoded.kind}`;
+  let detail = `call: ${decoded.kind}`;
 
   if (decoded.kind === "setApprovalForAll" && decoded.approvedAll) {
     status = "fail"; score = 90; reasonCodes.push("DANGEROUS_APPROVAL");
-    detail = "setApprovalForAll(true) — tüm NFT'lere sınırsız yetki";
+    detail = "setApprovalForAll(true) — unlimited approval over all NFTs";
   } else if ((decoded.kind === "approve" || decoded.kind === "increaseAllowance") && decoded.unlimited) {
     status = "fail"; score = 80; reasonCodes.push("DANGEROUS_APPROVAL");
-    detail = "sınırsız ERC20 allowance (uint256 max)";
+    detail = "unlimited ERC20 allowance (uint256 max)";
   } else if ((decoded.kind === "approve" || decoded.kind === "increaseAllowance") && (decoded.amount ?? 0n) > 0n) {
     status = "warn"; score = 40; reasonCodes.push("DANGEROUS_APPROVAL");
-    detail = "ERC20 allowance veriliyor (sınırlı)";
+    detail = "ERC20 allowance granted (limited)";
   }
 
   return {
@@ -66,7 +66,7 @@ function serializeDecoded(d: DecodedCall): Record<string, unknown> {
 export async function txSanctionsSignal(counterparty: string): Promise<SignalResult> {
   const r = await bazaarGet("/api/x402/sanctions", { address: counterparty });
   const p = payload(r);
-  if (!p || p.sanctioned === undefined) return UNKNOWN("sanctions", "sanctions", r.error ?? "veri yok");
+  if (!p || p.sanctioned === undefined) return UNKNOWN("sanctions", "sanctions", r.error ?? "no data");
   const matched = p.sanctioned === true;
   return {
     category: "sanctions",
@@ -74,7 +74,7 @@ export async function txSanctionsSignal(counterparty: string): Promise<SignalRes
     weight: 0.10,
     score: matched ? 100 : 0,
     source: "sanctions",
-    detail: matched ? `karşı taraf OFAC'ta (${String(p.matchType ?? "match")})` : "karşı taraf OFAC'ta değil",
+    detail: matched ? `counterparty on OFAC (${String(p.matchType ?? "match")})` : "counterparty not on OFAC",
     evidence: { reasonCodes: matched ? (["SANCTIONED_ADDRESS"] as ReasonCode[]) : [], counterparty },
   };
 }
@@ -85,7 +85,7 @@ export async function txContractRiskSignal(counterparty: string): Promise<Signal
   const p = payload(r);
   const sec = rec(p?.security);
   if (!p || (!sec && p.upgradeableProxy === undefined && p.isContract === undefined))
-    return UNKNOWN("contract_risk", "token-risk", r.error ?? "kontrat verisi yok");
+    return UNKNOWN("contract_risk", "token-risk", r.error ?? "no contract data");
 
   // EOA ise (kontrat değil) düşük risk — onaylanan adres bir cüzdan.
   if (p.isContract === false) {
@@ -95,7 +95,7 @@ export async function txContractRiskSignal(counterparty: string): Promise<Signal
       weight: 0.20,
       score: 5,
       source: "token-risk",
-      detail: "karşı taraf bir EOA (kontrat değil)",
+      detail: "counterparty is an EOA (not a contract)",
       evidence: { isContract: false, counterparty },
     };
   }
@@ -116,7 +116,7 @@ export async function txContractRiskSignal(counterparty: string): Promise<Signal
     weight: 0.20,
     score,
     source: "token-risk",
-    detail: reasonCodes.length ? "etkileşilen kontratta risk işaretleri" : "etkileşilen kontrat temiz",
+    detail: reasonCodes.length ? "interacted contract has risk flags" : "interacted contract clean",
     evidence: { reasonCodes, counterparty },
   };
 }

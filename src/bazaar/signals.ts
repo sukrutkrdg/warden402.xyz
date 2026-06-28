@@ -40,7 +40,7 @@ const UNKNOWN = (
 // ══════════════════════════════════════════════════════════════════
 function honeypotFromRisk(p: Record<string, unknown> | undefined): SignalResult {
   const sec = rec(p?.security);
-  if (!sec) return UNKNOWN("honeypot", "token-risk", "security objesi yok");
+  if (!sec) return UNKNOWN("honeypot", "token-risk", "no security object");
 
   const isHoneypot = sec.isHoneypot === true;
   const sellTax = num(sec.sellTaxPct) ?? 0;
@@ -63,7 +63,7 @@ function honeypotFromRisk(p: Record<string, unknown> | undefined): SignalResult 
     weight: 0.30,
     score,
     source: "token-risk",
-    detail: isHoneypot ? "honeypot tespit edildi" : `alış/satış vergisi %${buyTax}/%${sellTax}`,
+    detail: isHoneypot ? "honeypot detected" : `buy/sell tax ${buyTax}%/${sellTax}%`,
     evidence: { reasonCodes, isHoneypot, sellTax, buyTax },
   };
 }
@@ -71,7 +71,7 @@ function honeypotFromRisk(p: Record<string, unknown> | undefined): SignalResult 
 function contractRiskFromRisk(p: Record<string, unknown> | undefined): SignalResult {
   const sec = rec(p?.security);
   if (!sec && p?.upgradeableProxy === undefined)
-    return UNKNOWN("contract_risk", "token-risk", "kontrat alanları yok");
+    return UNKNOWN("contract_risk", "token-risk", "no contract fields");
 
   const ownership = rec(p?.ownership);
   const reasonCodes: ReasonCode[] = [];
@@ -103,10 +103,10 @@ function contractRiskFromRisk(p: Record<string, unknown> | undefined): SignalRes
     source: "token-risk",
     detail:
       reasonCodes.length > 0
-        ? [mintable && "mint", takeback && "ownership-geri-alma", pausable && "transfer-durdurma", proxy && "proxy", openSource === false && "doğrulanmamış kaynak"]
+        ? [mintable && "mint", takeback && "ownership-takeback", pausable && "transfer-pause", proxy && "proxy", openSource === false && "unverified source"]
             .filter(Boolean)
             .join(", ")
-        : "kontrol yetkileri temiz",
+        : "owner controls clean",
     evidence: { reasonCodes, proxy, mintable, pausable, takeback, hiddenOwner, openSource, renounced },
   };
 }
@@ -114,7 +114,7 @@ function contractRiskFromRisk(p: Record<string, unknown> | undefined): SignalRes
 function holdersFromRisk(p: Record<string, unknown> | undefined): SignalResult {
   const sec = rec(p?.security);
   const top10 = num(sec?.top10HolderPct) ?? num(sec?.topHolderPct);
-  if (top10 === undefined) return UNKNOWN("holder_concentration", "token-risk", "holder yüzdesi yok");
+  if (top10 === undefined) return UNKNOWN("holder_concentration", "token-risk", "no holder percentage");
 
   const reasonCodes: ReasonCode[] = [];
   let score: number;
@@ -130,7 +130,7 @@ function holdersFromRisk(p: Record<string, unknown> | undefined): SignalResult {
     weight: 0.15,
     score,
     source: "token-risk",
-    detail: `top-10 holder ~%${top10.toFixed(1)}`,
+    detail: `top-10 holders ~${top10.toFixed(1)}%`,
     evidence: { reasonCodes, top10 },
   };
 }
@@ -140,9 +140,9 @@ function holdersFromRisk(p: Record<string, unknown> | undefined): SignalResult {
 // ══════════════════════════════════════════════════════════════════
 function liquidityFromPools(r: BazaarResult<unknown>): SignalResult {
   const p = payload(r);
-  if (!p) return UNKNOWN("liquidity", "token-pools", r.error ?? "veri yok");
+  if (!p) return UNKNOWN("liquidity", "token-pools", r.error ?? "no data");
   const pools = Array.isArray(p.pools) ? (p.pools as unknown[]) : undefined;
-  if (!pools) return UNKNOWN("liquidity", "token-pools", "pools alanı yok");
+  if (!pools) return UNKNOWN("liquidity", "token-pools", "no pools field");
 
   const totalLiq = pools.reduce<number>((sum, pool) => sum + (num(rec(pool)?.liquidityUsd) ?? 0), 0);
   const reasonCodes: ReasonCode[] = [];
@@ -158,7 +158,7 @@ function liquidityFromPools(r: BazaarResult<unknown>): SignalResult {
     weight: 0.20,
     score,
     source: "token-pools",
-    detail: `toplam likidite ~$${Math.round(totalLiq).toLocaleString("en-US")} (${pools.length} havuz)`,
+    detail: `liquidity ~$${Math.round(totalLiq).toLocaleString("en-US")} (${pools.length} pools)`,
     evidence: { reasonCodes, totalLiq, poolCount: pools.length },
   };
 }
@@ -168,7 +168,7 @@ function liquidityFromPools(r: BazaarResult<unknown>): SignalResult {
 // ══════════════════════════════════════════════════════════════════
 function sanctionsFrom(r: BazaarResult<unknown>): SignalResult {
   const p = payload(r);
-  if (!p || p.sanctioned === undefined) return UNKNOWN("sanctions", "sanctions", r.error ?? "veri yok");
+  if (!p || p.sanctioned === undefined) return UNKNOWN("sanctions", "sanctions", r.error ?? "no data");
   const matched = p.sanctioned === true;
   return {
     category: "sanctions",
@@ -176,7 +176,7 @@ function sanctionsFrom(r: BazaarResult<unknown>): SignalResult {
     weight: 0.05,
     score: matched ? 100 : 0,
     source: "sanctions",
-    detail: matched ? `OFAC eşleşmesi (${String(p.matchType ?? "match")})` : "OFAC eşleşmesi yok",
+    detail: matched ? `OFAC match (${String(p.matchType ?? "match")})` : "no OFAC match",
     evidence: { reasonCodes: matched ? (["SANCTIONED_ADDRESS"] as ReasonCode[]) : [] },
   };
 }

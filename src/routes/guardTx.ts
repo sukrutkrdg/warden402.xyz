@@ -7,13 +7,13 @@ import { buildSummary } from "../llm/summary.js";
 import { recordVerdict } from "../store/ledger.js";
 import { SCHEMA_VERSION, type Verdict } from "../schema/verdict.js";
 
-const addr = z.string().regex(/^0x[a-fA-F0-9]{40}$/, "geçerli bir EVM adresi olmalı");
+const addr = z.string().regex(/^0x[a-fA-F0-9]{40}$/, "must be a valid EVM address");
 
 const Body = z.object({
   chainId: z.number().int().positive().default(8453),
   from: addr,
   to: addr,
-  calldata: z.string().regex(/^0x[a-fA-F0-9]*$/, "0x ile başlayan hex olmalı").default("0x"),
+  calldata: z.string().regex(/^0x[a-fA-F0-9]*$/, "must be 0x-prefixed hex").default("0x"),
   value: z.string().optional(),
 });
 
@@ -30,7 +30,7 @@ guardTx.post("/guard/tx", async (c) => {
   try {
     raw = await c.req.json();
   } catch {
-    return c.json({ error: "invalid_request", details: "JSON body bekleniyor" }, 400);
+    return c.json({ error: "invalid_request", details: "expected JSON body" }, 400);
   }
   const parsed = Body.safeParse(raw);
   if (!parsed.success) {

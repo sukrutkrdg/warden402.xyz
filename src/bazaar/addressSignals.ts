@@ -25,12 +25,12 @@ async function ageActivitySignal(address: string): Promise<SignalResult> {
   const r = await bazaarGet("/api/x402/address-intel", { address });
   const p = payload(r);
   if (!p) {
-    return { category: "age_activity", status: "unknown", weight: 0, score: 0, source: "address-intel", detail: r.error ?? "veri yok" };
+    return { category: "age_activity", status: "unknown", weight: 0, score: 0, source: "address-intel", detail: r.error ?? "no data" };
   }
   // Toleranslı: tx sayısı düşük/sıfır → taze/şüpheli aktivite.
   const txCount = num(p.txCount) ?? num(p.transactionCount) ?? num(rec(p.activity)?.txCount);
   if (txCount === undefined) {
-    return { category: "age_activity", status: "ok", weight: 0.05, score: 0, source: "address-intel", detail: "aktivite verisi kısıtlı" };
+    return { category: "age_activity", status: "ok", weight: 0.05, score: 0, source: "address-intel", detail: "limited activity data" };
   }
   let status: SignalResult["status"] = "ok";
   let score = 0;
@@ -42,7 +42,7 @@ async function ageActivitySignal(address: string): Promise<SignalResult> {
     weight: 0.05,
     score,
     source: "address-intel",
-    detail: `işlem sayısı ~${txCount}`,
+    detail: `~${txCount} transactions`,
     evidence: { txCount },
   };
 }

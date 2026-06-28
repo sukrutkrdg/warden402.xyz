@@ -26,7 +26,7 @@ export async function recordVerdict(v: Verdict): Promise<void> {
     await appendFile(LEDGER_PATH, JSON.stringify(v) + "\n", "utf8");
   } catch (err) {
     // Ledger yazımı verdict dönüşünü ASLA bloklamaz.
-    console.error("[ledger] yazılamadı:", err);
+    console.error("[ledger] write failed:", err);
   }
 }
 

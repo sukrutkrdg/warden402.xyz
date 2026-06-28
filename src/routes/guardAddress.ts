@@ -8,7 +8,7 @@ import { recordVerdict } from "../store/ledger.js";
 import { SCHEMA_VERSION, type Verdict } from "../schema/verdict.js";
 
 const Query = z.object({
-  address: z.string().regex(/^0x[a-fA-F0-9]{40}$/, "geçerli bir EVM adresi olmalı"),
+  address: z.string().regex(/^0x[a-fA-F0-9]{40}$/, "must be a valid EVM address"),
   chainId: z.coerce.number().int().positive().default(8453),
 });
 
