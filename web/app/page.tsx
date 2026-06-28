@@ -19,7 +19,7 @@ export default function Home() {
       </section>
 
       <section className="space-y-4">
-        <h2 className="text-sm uppercase tracking-widest text-slate-500">Live demo — token guard</h2>
+        <h2 className="text-sm uppercase tracking-widest text-slate-500">Live demo — token · address · transaction</h2>
         <GuardDemo />
       </section>
 
