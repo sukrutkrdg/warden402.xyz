@@ -1,0 +1,26 @@
+{
+  "name": "warden402",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Warden — pre-execution security & trust layer for agents transacting on Base (warden402.xyz)",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "smoke": "tsx scripts/smoke.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "@hono/node-server": "^1.13.7",
+    "hono": "^4.6.14",
+    "ulid": "^2.3.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "@types/node": "^20.17.10"
+  }
+}
