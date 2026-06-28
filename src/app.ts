@@ -29,6 +29,7 @@ app.get("/", (c) =>
       "GET  /guard/address?address=0x..&chainId=8453",
       "GET  /track-record",
       "POST /firewall/check     { kind, to, amountUsd?, calldata? }  (x-warden-agent-key)",
+      "POST /firewall/proxy     { action, forward:{url,method,body} }  (gateway mode)",
       "GET  /firewall/state",
       "GET  /firewall/audit",
     ],

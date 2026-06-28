@@ -47,6 +47,73 @@ firewall.post("/firewall/check", async (c) => {
   return c.json(result, status);
 });
 
+/** Block obvious SSRF targets (localhost / private ranges). */
+function isUnsafeUrl(u: string): boolean {
+  let url: URL;
+  try { url = new URL(u); } catch { return true; }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return true;
+  const h = url.hostname.toLowerCase();
+  if (h === "localhost" || h.endsWith(".local")) return true;
+  if (/^(127\.|10\.|192\.168\.|169\.254\.|0\.)/.test(h)) return true;
+  if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(h)) return true;
+  if (h === "::1" || h === "[::1]") return true;
+  return false;
+}
+
+const ProxySchema = z.object({
+  action: ActionSchema,
+  forward: z.object({
+    url: z.string().url(),
+    method: z.enum(["GET", "POST"]).default("GET"),
+    headers: z.record(z.string()).optional(),
+    body: z.string().optional(),
+  }),
+});
+
+/**
+ * POST /firewall/proxy — gateway mode.
+ * Evaluate the action; only if ALLOW, forward the real call to forward.url and
+ * return the upstream response. On hold/deny, nothing is forwarded.
+ */
+firewall.post("/firewall/proxy", async (c) => {
+  const state = getAgentByKey(agentKey(c));
+  if (!state) return c.json({ error: "unknown_agent" }, 401);
+  let raw: unknown;
+  try { raw = await c.req.json(); } catch { return c.json({ error: "invalid_request" }, 400); }
+  const parsed = ProxySchema.safeParse(raw);
+  if (!parsed.success) return c.json({ error: "invalid_request", details: parsed.error.flatten() }, 400);
+  const { action, forward } = parsed.data;
+
+  const result = await evaluate(state, action);
+  void recordAudit(result, action);
+
+  if (result.decision !== "allow") {
+    const status = result.decision === "deny" ? 403 : 202;
+    return c.json({ firewall: result, forwarded: false }, status);
+  }
+
+  if (isUnsafeUrl(forward.url)) return c.json({ firewall: result, forwarded: false, error: "unsafe_forward_url" }, 400);
+
+  try {
+    const upstream = await fetch(forward.url, {
+      method: forward.method,
+      headers: forward.headers,
+      body: forward.method === "POST" ? forward.body : undefined,
+    });
+    const text = await upstream.text();
+    return new Response(text, {
+      status: upstream.status,
+      headers: {
+        "content-type": upstream.headers.get("content-type") ?? "application/json",
+        "x-warden-decision": result.decision,
+        "x-warden-audit-id": result.auditId,
+      },
+    });
+  } catch (e) {
+    return c.json({ firewall: result, forwarded: true, error: "upstream_failed", detail: String(e) }, 502);
+  }
+});
+
 /** GET /firewall/state — agent's live budget. */
 firewall.get("/firewall/state", (c) => {
   const state = getAgentByKey(agentKey(c));
