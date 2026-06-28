@@ -28,15 +28,20 @@ export function GET() {
     miniapp: {
       version: "1",
       name: "Warden",
-      subtitle: "Pre-execution security for agents",
+      subtitle: "Pre-execution security",
       description:
-        "block / review / clear before your agent signs. Give Warden a token, a pending transaction or an address and collapse honeypots, unlimited allowances, sanctions, liquidity and holder concentration into a single decision on Base.",
+        "Block, review or clear before your agent signs. Check any token, transaction or address for honeypots, unlimited approvals, sanctions and liquidity risk on Base.",
       iconUrl: `${SITE_URL}/brand/icon`,
       homeUrl: SITE_URL,
       splashImageUrl: `${SITE_URL}/brand/splash`,
       splashBackgroundColor: "#0a0e14",
       heroImageUrl: `${SITE_URL}/brand/embed`,
       ogImageUrl: `${SITE_URL}/brand/embed`,
+      screenshotUrls: [
+        `${SITE_URL}/brand/shot1`,
+        `${SITE_URL}/brand/shot2`,
+        `${SITE_URL}/brand/shot3`,
+      ],
       primaryCategory: "developer-tools",
       tags: ["security", "x402", "base", "agents", "defi"],
     },
