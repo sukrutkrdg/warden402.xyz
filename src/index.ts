@@ -1,11 +1,14 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { guardToken } from "./routes/guardToken.js";
 import { guardTx } from "./routes/guardTx.js";
 import { guardAddress } from "./routes/guardAddress.js";
 import { trackRecord } from "./routes/trackRecord.js";
 
 const app = new Hono();
+
+app.use("*", cors());
 
 app.get("/", (c) =>
   c.json({
