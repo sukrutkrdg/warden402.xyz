@@ -38,16 +38,50 @@ export default function Home() {
 
       <section className="space-y-3">
         <h2 className="text-sm uppercase tracking-widest text-slate-500">For agents — API & MCP</h2>
-        <div className="rounded-xl border border-edge bg-panel/60 p-5 text-sm">
-          <pre className="overflow-x-auto text-slate-300">
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="rounded-xl border border-edge bg-panel/60 p-5 text-sm">
+            <div className="mb-2 text-xs uppercase tracking-widest text-slate-500">HTTP API</div>
+            <pre className="overflow-x-auto text-slate-300">
 {`# token guard
 curl "https://warden402.xyz/api/guard?type=token&address=0x..."
 
 # pre-sign (pending transaction)
 curl -X POST https://warden402.xyz/api/guard \\
   -H "content-type: application/json" \\
-  -d '{"type":"tx","from":"0x..","to":"0x..","calldata":"0x095ea7b3..."}'`}
-          </pre>
+  -d '{"type":"tx","from":"0x..","to":"0x..","calldata":"0x.."}'`}
+            </pre>
+          </div>
+          <div className="rounded-xl border border-edge bg-panel/60 p-5 text-sm">
+            <div className="mb-2 text-xs uppercase tracking-widest text-slate-500">MCP server — no keys</div>
+            <pre className="overflow-x-auto text-slate-300">
+{`{
+  "mcpServers": {
+    "warden402": {
+      "command": "npx",
+      "args": ["-y", "warden402-mcp"]
+    }
+  }
+}`}
+            </pre>
+            <div className="mt-2 text-xs text-slate-500">
+              tools: guard_token · guard_tx · guard_address
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-warden/30 bg-warden/5 p-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-white">Running a fleet of agents?</h2>
+            <p className="mt-1 max-w-xl text-sm text-slate-400">
+              The Firewall puts spend caps, allow/deny, drain protection and a kill switch in
+              front of every agent payment and transaction — every decision audited.
+            </p>
+          </div>
+          <a href="/firewall" className="shrink-0 rounded-lg bg-warden px-5 py-3 text-sm font-semibold text-ink transition hover:brightness-110">
+            Explore the Firewall →
+          </a>
         </div>
       </section>
     </div>
