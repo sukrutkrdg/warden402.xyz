@@ -1,0 +1,24 @@
+{
+  "name": "@warden402/sdk",
+  "version": "0.1.0",
+  "description": "Warden SDK — pre-execution safety checks for agents on Base. Wrap any token/tx/address in block·review·clear before you act.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./langchain": "./src/langchain.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "files": ["src", "README.md"],
+  "homepage": "https://warden402.xyz",
+  "license": "MIT",
+  "peerDependencies": {
+    "@langchain/core": "*"
+  },
+  "peerDependenciesMeta": {
+    "@langchain/core": { "optional": true }
+  }
+}
