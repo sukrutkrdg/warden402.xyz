@@ -1,134 +1,155 @@
 /**
  * Sinyal adaptörleri: Bazaar yanıtı → SignalResult.
  *
- * NOT: Aşağıdaki alan adları Bazaar yanıt şekline göre KALİBRE edilecek.
+ * Gerçek Bazaar yanıtlarına göre KALİBRE edildi (probe.ts ile doğrulandı).
+ * Bazaar yanıtı şu zarfla gelir: { service, builderCode, data: <PAYLOAD>, internal }.
+ * Gerçek alanlar PAYLOAD = r.data.data altındadır.
+ *
+ * Tasarım: token-risk tek çağrıda honeypot + kontrat riski + holder yoğunluğu
+ * verir (security objesi). Böylece /guard/token yalnızca 3 Bazaar çağrısı yapar:
+ *   token-risk, token-pools, sanctions.
+ *
  * Her parser toleranslıdır: beklenen alanı bulamazsa status='unknown' döner,
  * böylece motor degrade eder (asla sahte 'clear' üretmez).
- * `scripts/probe.ts` ile gerçek yanıtları çekip alan adlarını doğrulayacağız.
  */
 import type { ReasonCode, SignalResult } from "../schema/verdict.js";
-import { bazaarGet } from "./client.js";
+import { bazaarGet, type BazaarResult } from "./client.js";
 
+// ── yardımcılar ───────────────────────────────────────────────────
 function num(v: unknown): number | undefined {
   const n = typeof v === "string" ? Number(v) : typeof v === "number" ? v : undefined;
   return n !== undefined && Number.isFinite(n) ? n : undefined;
 }
-function pick(obj: unknown, ...keys: string[]): unknown {
-  if (!obj || typeof obj !== "object") return undefined;
-  const rec = obj as Record<string, unknown>;
-  for (const k of keys) if (k in rec && rec[k] != null) return rec[k];
-  return undefined;
+function rec(v: unknown): Record<string, unknown> | undefined {
+  return v && typeof v === "object" ? (v as Record<string, unknown>) : undefined;
 }
+/** Bazaar zarfını aç: { service, data: PAYLOAD } → PAYLOAD */
+function payload(r: BazaarResult<unknown>): Record<string, unknown> | undefined {
+  if (!r.ok || !r.data) return undefined;
+  const outer = rec(r.data);
+  return rec(outer?.data) ?? outer;
+}
+const UNKNOWN = (
+  category: SignalResult["category"],
+  source: string,
+  detail: string,
+): SignalResult => ({ category, status: "unknown", weight: 0, score: 0, source, detail });
 
-const UNKNOWN = (category: SignalResult["category"], source: string, detail: string): SignalResult => ({
-  category,
-  status: "unknown",
-  weight: 0,
-  score: 0,
-  source,
-  detail,
-});
+// ══════════════════════════════════════════════════════════════════
+// token-risk: TEK çağrı → 3 sinyal (honeypot, contract_risk, holders)
+// ══════════════════════════════════════════════════════════════════
+function honeypotFromRisk(p: Record<string, unknown> | undefined): SignalResult {
+  const sec = rec(p?.security);
+  if (!sec) return UNKNOWN("honeypot", "token-risk", "security objesi yok");
 
-// ── 1) rug-score → honeypot/contract çekirdek sinyali ─────────────
-export async function rugScoreSignal(address: string): Promise<SignalResult> {
-  const r = await bazaarGet("/api/x402/rug-score", { address });
-  if (!r.ok || !r.data) return UNKNOWN("honeypot", "rug-score", r.error ?? "no data");
+  const isHoneypot = sec.isHoneypot === true;
+  const sellTax = num(sec.sellTaxPct) ?? 0;
+  const buyTax = num(sec.buyTaxPct) ?? 0;
+  const reasonCodes: ReasonCode[] = [];
+  let score = 0;
+  let status: SignalResult["status"] = "ok";
 
-  // Beklenen: 0-100 rug probability + flagged signals
-  const score = num(pick(r.data, "rugScore", "score", "rug_probability", "probability"));
-  if (score === undefined) return UNKNOWN("honeypot", "rug-score", "skor alanı bulunamadı");
-
-  const flags = (pick(r.data, "flags", "signals", "flagged") as unknown[]) ?? [];
-  const reasonCodes = mapRugFlags(flags);
-  const status: SignalResult["status"] = score >= 70 ? "fail" : score >= 35 ? "warn" : "ok";
+  if (isHoneypot) {
+    score = 100; status = "fail"; reasonCodes.push("HONEYPOT_DETECTED");
+  } else if (sellTax >= 30 || buyTax >= 30) {
+    score = 85; status = "fail"; reasonCodes.push("SELL_TAX_EXCESSIVE");
+  } else if (sellTax >= 10 || buyTax >= 10) {
+    score = 50; status = "warn"; reasonCodes.push("SELL_TAX_EXCESSIVE");
+  }
 
   return {
     category: "honeypot",
     status,
     weight: 0.30,
     score,
-    source: "rug-score",
-    detail: `rug-score ${score}/100`,
-    evidence: { raw: r.data, reasonCodes, flags },
+    source: "token-risk",
+    detail: isHoneypot ? "honeypot tespit edildi" : `alış/satış vergisi %${buyTax}/%${sellTax}`,
+    evidence: { reasonCodes, isHoneypot, sellTax, buyTax },
   };
 }
 
-function mapRugFlags(flags: unknown[]): ReasonCode[] {
-  const out: ReasonCode[] = [];
-  const text = JSON.stringify(flags).toLowerCase();
-  if (text.includes("honeypot")) out.push("HONEYPOT_DETECTED");
-  if (text.includes("mint")) out.push("OWNER_CAN_MINT");
-  if (text.includes("blacklist")) out.push("OWNER_CAN_BLACKLIST");
-  if (text.includes("proxy") || text.includes("upgrad")) out.push("PROXY_UPGRADEABLE");
-  if (text.includes("tax")) out.push("SELL_TAX_EXCESSIVE");
-  return out;
-}
+function contractRiskFromRisk(p: Record<string, unknown> | undefined): SignalResult {
+  const sec = rec(p?.security);
+  if (!sec && p?.upgradeableProxy === undefined)
+    return UNKNOWN("contract_risk", "token-risk", "kontrat alanları yok");
 
-// ── 2) token-risk → contract_risk (ownership / proxy / conformance) ─
-export async function contractRiskSignal(address: string): Promise<SignalResult> {
-  const r = await bazaarGet("/api/x402/token-risk", { address });
-  if (!r.ok || !r.data) return UNKNOWN("contract_risk", "token-risk", r.error ?? "no data");
-
-  const score = num(pick(r.data, "riskScore", "score", "risk"));
-  const isProxy = Boolean(pick(r.data, "proxy", "isProxy", "upgradeable"));
-  const verified = pick(r.data, "verified", "sourceVerified");
+  const ownership = rec(p?.ownership);
   const reasonCodes: ReasonCode[] = [];
-  if (isProxy) reasonCodes.push("PROXY_UPGRADEABLE");
-  if (verified === false) reasonCodes.push("SOURCE_UNVERIFIED");
+  let score = 0;
 
-  if (score === undefined && reasonCodes.length === 0)
-    return UNKNOWN("contract_risk", "token-risk", "risk alanı bulunamadı");
+  const proxy = p?.upgradeableProxy === true;
+  const mintable = sec?.isMintable === true;
+  const pausable = sec?.transferPausable === true;
+  const takeback = sec?.canTakeBackOwnership === true;
+  const hiddenOwner = sec?.hiddenOwner === true;
+  const openSource = sec?.isOpenSource; // true/false/null
+  const renounced = ownership?.renounced; // true/false/null
 
-  const s = score ?? (reasonCodes.length ? 50 : 0);
-  const status: SignalResult["status"] = s >= 70 ? "fail" : s >= 35 || reasonCodes.length ? "warn" : "ok";
+  if (mintable) { score += 40; reasonCodes.push("OWNER_CAN_MINT"); }
+  if (takeback) { score += 40; }
+  if (hiddenOwner) { score += 40; }
+  if (pausable) { score += 25; reasonCodes.push("OWNER_CAN_BLACKLIST"); }
+  if (proxy) { score += 20; reasonCodes.push("PROXY_UPGRADEABLE"); }
+  if (openSource === false) { score += 30; reasonCodes.push("SOURCE_UNVERIFIED"); }
+  if (renounced === false) { score += 10; }
+
+  score = Math.min(100, score);
+  const status: SignalResult["status"] = score >= 70 ? "fail" : score >= 35 ? "warn" : "ok";
   return {
     category: "contract_risk",
     status,
     weight: 0.20,
-    score: s,
+    score,
     source: "token-risk",
-    detail: isProxy ? "yükseltilebilir proxy" : `risk ${s}/100`,
-    evidence: { raw: r.data, reasonCodes },
+    detail:
+      reasonCodes.length > 0
+        ? [mintable && "mint", takeback && "ownership-geri-alma", pausable && "transfer-durdurma", proxy && "proxy", openSource === false && "doğrulanmamış kaynak"]
+            .filter(Boolean)
+            .join(", ")
+        : "kontrol yetkileri temiz",
+    evidence: { reasonCodes, proxy, mintable, pausable, takeback, hiddenOwner, openSource, renounced },
   };
 }
 
-// ── 3) holders → holder_concentration (+ LP-lock ipucu) ───────────
-export async function holdersSignal(address: string): Promise<SignalResult> {
-  const r = await bazaarGet("/api/x402/holders", { address });
-  if (!r.ok || !r.data) return UNKNOWN("holder_concentration", "holders", r.error ?? "no data");
+function holdersFromRisk(p: Record<string, unknown> | undefined): SignalResult {
+  const sec = rec(p?.security);
+  const top10 = num(sec?.top10HolderPct) ?? num(sec?.topHolderPct);
+  if (top10 === undefined) return UNKNOWN("holder_concentration", "token-risk", "holder yüzdesi yok");
 
-  // top holder yüzdesi (0-100). Alan adları kalibre edilecek.
-  const topPct = num(pick(r.data, "topHolderPct", "top1", "topHolderPercent", "concentration"));
-  if (topPct === undefined) return UNKNOWN("holder_concentration", "holders", "yoğunluk alanı yok");
+  const reasonCodes: ReasonCode[] = [];
+  let score: number;
+  let status: SignalResult["status"];
+  if (top10 >= 80) { score = 90; status = "fail"; reasonCodes.push("HOLDER_CONCENTRATION_HIGH"); }
+  else if (top10 >= 50) { score = 60; status = "warn"; reasonCodes.push("HOLDER_CONCENTRATION_HIGH"); }
+  else if (top10 >= 30) { score = 40; status = "warn"; }
+  else { score = Math.round(top10 / 2); status = "ok"; }
 
-  const score = Math.min(100, Math.round(topPct)); // kaba: top holder % ≈ risk
-  const reasonCodes: ReasonCode[] = topPct >= 50 ? ["HOLDER_CONCENTRATION_HIGH"] : [];
-  const status: SignalResult["status"] = topPct >= 50 ? "fail" : topPct >= 30 ? "warn" : "ok";
   return {
     category: "holder_concentration",
     status,
     weight: 0.15,
     score,
-    source: "holders",
-    detail: `en büyük holder ~%${topPct}`,
-    evidence: { raw: r.data, reasonCodes },
+    source: "token-risk",
+    detail: `top-10 holder ~%${top10.toFixed(1)}`,
+    evidence: { reasonCodes, top10 },
   };
 }
 
-// ── 4) token-pools → liquidity derinliği ──────────────────────────
-export async function liquiditySignal(address: string): Promise<SignalResult> {
-  const r = await bazaarGet("/api/x402/token-pools", { address });
-  if (!r.ok || !r.data) return UNKNOWN("liquidity", "token-pools", r.error ?? "no data");
+// ══════════════════════════════════════════════════════════════════
+// token-pools → liquidity (tüm pool'ların liquidityUsd toplamı)
+// ══════════════════════════════════════════════════════════════════
+function liquidityFromPools(r: BazaarResult<unknown>): SignalResult {
+  const p = payload(r);
+  if (!p) return UNKNOWN("liquidity", "token-pools", r.error ?? "veri yok");
+  const pools = Array.isArray(p.pools) ? (p.pools as unknown[]) : undefined;
+  if (!pools) return UNKNOWN("liquidity", "token-pools", "pools alanı yok");
 
-  const liqUsd = num(pick(r.data, "totalLiquidityUsd", "liquidityUsd", "liquidity", "totalLiquidity"));
-  if (liqUsd === undefined) return UNKNOWN("liquidity", "token-pools", "likidite alanı yok");
-
-  // Düşük likidite = yüksek risk. Eşikler kabaca: <5k kritik, <25k uyarı.
-  let score = 0;
-  let status: SignalResult["status"] = "ok";
+  const totalLiq = pools.reduce<number>((sum, pool) => sum + (num(rec(pool)?.liquidityUsd) ?? 0), 0);
   const reasonCodes: ReasonCode[] = [];
-  if (liqUsd < 5_000) { score = 80; status = "fail"; reasonCodes.push("LIQUIDITY_LOW"); }
-  else if (liqUsd < 25_000) { score = 45; status = "warn"; reasonCodes.push("LIQUIDITY_LOW"); }
+  let score: number;
+  let status: SignalResult["status"];
+  if (totalLiq < 5_000) { score = 80; status = "fail"; reasonCodes.push("LIQUIDITY_LOW"); }
+  else if (totalLiq < 25_000) { score = 45; status = "warn"; reasonCodes.push("LIQUIDITY_LOW"); }
   else { score = 10; status = "ok"; }
 
   return {
@@ -137,35 +158,44 @@ export async function liquiditySignal(address: string): Promise<SignalResult> {
     weight: 0.20,
     score,
     source: "token-pools",
-    detail: `likidite ~$${Math.round(liqUsd).toLocaleString("en-US")}`,
-    evidence: { raw: r.data, reasonCodes },
+    detail: `toplam likidite ~$${Math.round(totalLiq).toLocaleString("en-US")} (${pools.length} havuz)`,
+    evidence: { reasonCodes, totalLiq, poolCount: pools.length },
   };
 }
 
-// ── 5) sanctions → OFAC (SERT KURAL: fail => block) ───────────────
-export async function sanctionsSignal(address: string): Promise<SignalResult> {
-  const r = await bazaarGet("/api/x402/sanctions", { address });
-  if (!r.ok || !r.data) return UNKNOWN("sanctions", "sanctions", r.error ?? "no data");
-
-  const matched = Boolean(pick(r.data, "match", "matched", "sanctioned", "isSanctioned"));
+// ══════════════════════════════════════════════════════════════════
+// sanctions → OFAC (SERT KURAL: fail => block)
+// ══════════════════════════════════════════════════════════════════
+function sanctionsFrom(r: BazaarResult<unknown>): SignalResult {
+  const p = payload(r);
+  if (!p || p.sanctioned === undefined) return UNKNOWN("sanctions", "sanctions", r.error ?? "veri yok");
+  const matched = p.sanctioned === true;
   return {
     category: "sanctions",
     status: matched ? "fail" : "ok",
     weight: 0.05,
     score: matched ? 100 : 0,
     source: "sanctions",
-    detail: matched ? "OFAC SDN eşleşmesi" : "yaptırım eşleşmesi yok",
-    evidence: { raw: r.data, reasonCodes: matched ? (["SANCTIONED_ADDRESS"] as ReasonCode[]) : [] },
+    detail: matched ? `OFAC eşleşmesi (${String(p.matchType ?? "match")})` : "OFAC eşleşmesi yok",
+    evidence: { reasonCodes: matched ? (["SANCTIONED_ADDRESS"] as ReasonCode[]) : [] },
   };
 }
 
-/** /guard/token için tüm sinyalleri PARALEL topla. */
+/** /guard/token için tüm sinyalleri 3 PARALEL çağrıyla topla. */
 export async function collectTokenSignals(address: string): Promise<SignalResult[]> {
-  return Promise.all([
-    rugScoreSignal(address),
-    contractRiskSignal(address),
-    holdersSignal(address),
-    liquiditySignal(address),
-    sanctionsSignal(address),
+  const [risk, pools, sanctions] = await Promise.all([
+    bazaarGet("/api/x402/token-risk", { address }),
+    bazaarGet("/api/x402/token-pools", { address }),
+    bazaarGet("/api/x402/sanctions", { address }),
   ]);
+
+  const riskP = payload(risk);
+  // token-risk düştüyse 3 sinyal de unknown olur (parser security yokluğunu yakalar)
+  return [
+    honeypotFromRisk(riskP),
+    contractRiskFromRisk(riskP),
+    holdersFromRisk(riskP),
+    liquidityFromPools(pools),
+    sanctionsFrom(sanctions),
+  ];
 }
