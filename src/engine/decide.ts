@@ -54,7 +54,11 @@ export function decide(signals: SignalResult[]): Decided {
   const confidence =
     criticalTotal > 0 ? Number((criticalOk / criticalTotal).toFixed(2)) : 0;
 
-  // 1) Sert kural
+  // Escalation girdileri — tek bir ciddi sinyal ortalamada kaybolmasın.
+  const anyFail = signals.some((s) => s.status === "fail"); // sert olmayan fail dahil
+  const warnCount = signals.filter((s) => s.status === "warn").length;
+
+  // 1) Sert kural: honeypot/sanctions fail → skordan bağımsız block
   const hardFail = signals.some(
     (s) => s.status === "fail" && HARD_BLOCK_CATEGORIES.includes(s.category),
   );
@@ -62,12 +66,12 @@ export function decide(signals: SignalResult[]): Decided {
     return { decision: "block", riskScore: Math.max(riskScore, BLOCK_THRESHOLD), confidence, reasons, degraded };
   }
 
-  // 3) Skor eşiği block
+  // 2) Skor eşiği block
   if (riskScore >= BLOCK_THRESHOLD) {
     return { decision: "block", riskScore, confidence, reasons, degraded };
   }
 
-  // 2) Degrade → en iyi ihtimalle review
+  // 3) Degrade → en iyi ihtimalle review
   if (degraded) {
     const reasonsWithDegrade = reasons.includes("SIGNAL_UNAVAILABLE")
       ? reasons
@@ -75,12 +79,23 @@ export function decide(signals: SignalResult[]): Decided {
     return { decision: "review", riskScore, confidence, reasons: reasonsWithDegrade, degraded };
   }
 
-  // 4) review eşiği
+  // 4) ESCALATION: herhangi bir 'fail' sinyali (likidite çöküşü, vb.) tek başına
+  //    en az 'review' gerektirir — ağırlıklı ortalama düşük olsa bile.
+  if (anyFail) {
+    return { decision: "review", riskScore, confidence, reasons, degraded };
+  }
+
+  // 5) review eşiği
   if (riskScore >= REVIEW_THRESHOLD) {
     return { decision: "review", riskScore, confidence, reasons, degraded };
   }
 
-  // 5) clear
+  // 6) Birden çok uyarı birikmişse (tek başına eşiği geçmese de) → review.
+  if (warnCount >= 2) {
+    return { decision: "review", riskScore, confidence, reasons, degraded };
+  }
+
+  // 7) clear
   return { decision: "clear", riskScore, confidence, reasons, degraded };
 }
 

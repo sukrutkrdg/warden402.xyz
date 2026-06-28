@@ -33,6 +33,13 @@ const cases: Record<string, SignalResult[]> = {
     sig({ category: "liquidity", status: "warn", weight: 0.2, score: 45, evidence: { reasonCodes: ["LIQUIDITY_LOW"] } }),
     sig({ category: "contract_risk", status: "ok", weight: 0.2, score: 20 }),
   ],
+  "REVIEW — tek fail ortalamada kaybolmasın (likidite çöküşü)": [
+    sig({ category: "liquidity", status: "fail", weight: 0.2, score: 80, evidence: { reasonCodes: ["LIQUIDITY_LOW"] } }),
+    sig({ category: "honeypot", status: "ok", weight: 0.3, score: 0 }),
+    sig({ category: "contract_risk", status: "ok", weight: 0.2, score: 5 }),
+    sig({ category: "holder_concentration", status: "ok", weight: 0.15, score: 10 }),
+    sig({ category: "sanctions", status: "ok", weight: 0.05, score: 0 }),
+  ],
   "REVIEW — degrade (kritik sinyal unknown)": [
     sig({ category: "honeypot", status: "unknown", weight: 0, score: 0 }),
     sig({ category: "liquidity", status: "ok", weight: 0.2, score: 10 }),

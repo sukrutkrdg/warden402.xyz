@@ -120,8 +120,8 @@ function holdersFromRisk(p: Record<string, unknown> | undefined): SignalResult {
   let score: number;
   let status: SignalResult["status"];
   if (top10 >= 80) { score = 90; status = "fail"; reasonCodes.push("HOLDER_CONCENTRATION_HIGH"); }
-  else if (top10 >= 50) { score = 60; status = "warn"; reasonCodes.push("HOLDER_CONCENTRATION_HIGH"); }
-  else if (top10 >= 30) { score = 40; status = "warn"; }
+  else if (top10 >= 50) { score = 70; status = "fail"; reasonCodes.push("HOLDER_CONCENTRATION_HIGH"); }
+  else if (top10 >= 30) { score = 45; status = "warn"; reasonCodes.push("HOLDER_CONCENTRATION_HIGH"); }
   else { score = Math.round(top10 / 2); status = "ok"; }
 
   return {
