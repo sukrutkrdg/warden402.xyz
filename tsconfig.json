@@ -14,5 +14,6 @@
     "verbatimModuleSyntax": false,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*.ts", "scripts/**/*.ts"]
+  "include": ["src/**/*.ts", "scripts/**/*.ts", "api/**/*.ts"],
+  "exclude": ["web", "sdk", "mcp", "node_modules"]
 }
