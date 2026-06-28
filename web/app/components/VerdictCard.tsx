@@ -11,7 +11,7 @@ export function VerdictCard({ v }: { v: Verdict }) {
   if (v.error) {
     return (
       <div className="rounded-xl border border-block/40 bg-block/10 p-5 text-sm text-block">
-        Hata: {v.error}
+        Error: {v.error}
       </div>
     );
   }
@@ -28,7 +28,7 @@ export function VerdictCard({ v }: { v: Verdict }) {
         </div>
         <div className="text-right text-xs text-slate-400">
           <div>risk <span className="text-white">{v.riskScore}</span>/100</div>
-          <div>güven {Math.round(v.confidence * 100)}%</div>
+          <div>confidence {Math.round(v.confidence * 100)}%</div>
         </div>
       </div>
 
@@ -44,8 +44,8 @@ export function VerdictCard({ v }: { v: Verdict }) {
 
       {v.decoded && (
         <div className="mt-3 text-xs text-slate-400">
-          çağrı: <span className="text-slate-200">{v.decoded.kind}</span>
-          {v.decoded.unlimited && <span className="ml-2 text-block">· sınırsız allowance</span>}
+          call: <span className="text-slate-200">{v.decoded.kind}</span>
+          {v.decoded.unlimited && <span className="ml-2 text-block">· unlimited allowance</span>}
           {v.decoded.approvedAll && <span className="ml-2 text-block">· approveForAll</span>}
         </div>
       )}

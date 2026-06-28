@@ -40,11 +40,12 @@ export default async function TrackRecord() {
       <div className="space-y-4">
         <h1 className="text-3xl font-bold text-white">Track Record</h1>
         <div className="rounded-xl border border-edge bg-panel/60 p-6 text-sm text-slate-400">
-          <p className="mb-2 text-slate-300">Henüz yayınlanmış istatistik yok.</p>
+          <p className="mb-2 text-slate-300">No published stats yet.</p>
           <p>
-            Her verdict snapshot'lanır ve sonuçları zamanla yeniden ölçülür; bu sayfa
-            kalıcı ledger'a bağlı bir API ile dolar (bkz. <span className="text-warden">DEPLOY.md</span>).
-            Kanıtlanabilir isabet geçmişi — Warden'ın asıl moat'ı — burada görünecek.
+            Every verdict is snapshotted and its outcome re-measured over time; this page
+            fills in once connected to an API with a persistent ledger (see{" "}
+            <span className="text-warden">DEPLOY.md</span>). The provable hit-rate — Warden&apos;s
+            real moat — will show up here.
           </p>
         </div>
       </div>
@@ -56,32 +57,32 @@ export default async function TrackRecord() {
       <div className="space-y-2">
         <h1 className="text-3xl font-bold text-white">Track Record</h1>
         <p className="text-sm text-slate-400">
-          Her verdict snapshot'lanır ve sonuçları yeniden ölçülür. Bu, ham veri sarmalayıcısının
-          asla üretemeyeceği şey: kanıtlanabilir isabet geçmişi.
+          Every verdict is snapshotted and its outcome re-measured. This is what a raw data
+          wrapper can never produce: a provable hit-rate.
         </p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-4">
-        <Stat label="toplam verdict" value={s.totalVerdicts} />
-        <Stat label="kontrol edilen sonuç" value={s.checkedOutcomes} />
-        <Stat label="yakalanan rug" value={s.rugsCaught} accent="text-clear" />
-        <Stat label="kaçan rug" value={s.rugsMissed} accent={s.rugsMissed > 0 ? "text-block" : "text-white"} />
+        <Stat label="total verdicts" value={s.totalVerdicts} />
+        <Stat label="outcomes checked" value={s.checkedOutcomes} />
+        <Stat label="rugs caught" value={s.rugsCaught} accent="text-clear" />
+        <Stat label="rugs missed" value={s.rugsMissed} accent={s.rugsMissed > 0 ? "text-block" : "text-white"} />
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="rounded-xl border border-edge bg-panel/60 p-5">
-          <h3 className="mb-3 text-sm uppercase tracking-widest text-slate-500">İsabet oranı</h3>
+          <h3 className="mb-3 text-sm uppercase tracking-widest text-slate-500">Hit rate</h3>
           <div className="text-5xl font-bold text-warden">
             {s.hitRatePct === null ? "—" : `${s.hitRatePct}%`}
           </div>
           <p className="mt-2 text-xs text-slate-500">
             {s.hitRatePct === null
-              ? "Henüz yeterli doğrulanmış sonuç yok. Re-checker biriktikçe dolacak."
-              : "block/review verdiğimiz ve sonradan gerçekten rug olan oranı."}
+              ? "Not enough verified outcomes yet. Fills in as the re-checker runs."
+              : "Share of tokens we flagged block/review that later actually rugged."}
           </p>
         </div>
         <div className="rounded-xl border border-edge bg-panel/60 p-5">
-          <h3 className="mb-3 text-sm uppercase tracking-widest text-slate-500">Karar dağılımı</h3>
+          <h3 className="mb-3 text-sm uppercase tracking-widest text-slate-500">Decision mix</h3>
           <div className="space-y-2 text-sm">
             <Row label="block" value={s.byDecision.block} color="bg-block" total={s.totalVerdicts} />
             <Row label="review" value={s.byDecision.review} color="bg-review" total={s.totalVerdicts} />
@@ -90,7 +91,7 @@ export default async function TrackRecord() {
         </div>
       </div>
 
-      <p className="text-[11px] text-slate-600">güncellendi: {new Date(s.generatedAt).toLocaleString("tr-TR")}</p>
+      <p className="text-[11px] text-slate-600">updated: {new Date(s.generatedAt).toLocaleString("en-US")}</p>
     </div>
   );
 }

@@ -109,7 +109,7 @@ function honeypotFromRisk(p?: Record<string, unknown>): SignalResult {
   else if (sellTax >= 30 || buyTax >= 30) { score = 85; status = "fail"; reasonCodes.push("SELL_TAX_EXCESSIVE"); }
   else if (sellTax >= 10 || buyTax >= 10) { score = 50; status = "warn"; reasonCodes.push("SELL_TAX_EXCESSIVE"); }
   return { category: "honeypot", status, weight: 0.30, score, source: "token-risk",
-    detail: isHoneypot ? "honeypot tespit edildi" : `vergi %${buyTax}/%${sellTax}`, evidence: { reasonCodes } };
+    detail: isHoneypot ? "honeypot detected" : `tax ${buyTax}%/${sellTax}%`, evidence: { reasonCodes } };
 }
 function contractRiskFromRisk(p?: Record<string, unknown>): SignalResult {
   const sec = rec(p?.security);
@@ -125,7 +125,7 @@ function contractRiskFromRisk(p?: Record<string, unknown>): SignalResult {
   score = Math.min(100, score);
   const status: SignalStatus = score >= 70 ? "fail" : score >= 35 ? "warn" : "ok";
   return { category: "contract_risk", status, weight: 0.20, score, source: "token-risk",
-    detail: reasonCodes.length ? "kontrol yetkisi riski" : "kontrat temiz", evidence: { reasonCodes } };
+    detail: reasonCodes.length ? "owner control risk" : "contract controls clean", evidence: { reasonCodes } };
 }
 function holdersFromRisk(p?: Record<string, unknown>): SignalResult {
   const sec = rec(p?.security);
@@ -137,7 +137,7 @@ function holdersFromRisk(p?: Record<string, unknown>): SignalResult {
   else if (top10 >= 30) { score = 45; status = "warn"; reasonCodes.push("HOLDER_CONCENTRATION_HIGH"); }
   else { score = Math.round(top10 / 2); status = "ok"; }
   return { category: "holder_concentration", status, weight: 0.15, score, source: "token-risk",
-    detail: `top-10 holder ~%${top10.toFixed(1)}`, evidence: { reasonCodes } };
+    detail: `top-10 holders ~${top10.toFixed(1)}%`, evidence: { reasonCodes } };
 }
 function liquidityFromPools(r: BazaarResult): SignalResult {
   const p = payload(r);
@@ -150,14 +150,14 @@ function liquidityFromPools(r: BazaarResult): SignalResult {
   else if (totalLiq < 25_000) { score = 45; status = "warn"; reasonCodes.push("LIQUIDITY_LOW"); }
   else { score = 10; status = "ok"; }
   return { category: "liquidity", status, weight: 0.20, score, source: "token-pools",
-    detail: `likidite ~$${Math.round(totalLiq).toLocaleString("en-US")} (${pools.length} havuz)`, evidence: { reasonCodes, totalLiq } };
+    detail: `liquidity ~$${Math.round(totalLiq).toLocaleString("en-US")} (${pools.length} pools)`, evidence: { reasonCodes, totalLiq } };
 }
 function sanctionsFrom(r: BazaarResult, who = "adres"): SignalResult {
   const p = payload(r);
   if (!p || p.sanctioned === undefined) return UNKNOWN("sanctions", "sanctions", r.error ?? "veri yok");
   const matched = p.sanctioned === true;
   return { category: "sanctions", status: matched ? "fail" : "ok", weight: 0.05, score: matched ? 100 : 0,
-    source: "sanctions", detail: matched ? `${who} OFAC'ta` : `${who} OFAC'ta değil`,
+    source: "sanctions", detail: matched ? `${who} on OFAC list` : `${who} not on OFAC list`,
     evidence: { reasonCodes: matched ? (["SANCTIONED_ADDRESS"] as ReasonCode[]) : [] } };
 }
 
@@ -189,17 +189,17 @@ function decodeCalldata(calldata?: string): Decoded {
   return { selector: sel, kind: "unknown" };
 }
 function approvalSignal(dec: Decoded): SignalResult {
-  const reasonCodes: ReasonCode[] = []; let status: SignalStatus = "ok"; let score = 0; let detail = `çağrı: ${dec.kind}`;
-  if (dec.kind === "setApprovalForAll" && dec.approvedAll) { status = "fail"; score = 90; reasonCodes.push("DANGEROUS_APPROVAL"); detail = "setApprovalForAll(true) — tüm NFT'lere yetki"; }
-  else if ((dec.kind === "approve" || dec.kind === "increaseAllowance") && dec.unlimited) { status = "fail"; score = 80; reasonCodes.push("DANGEROUS_APPROVAL"); detail = "sınırsız ERC20 allowance"; }
-  else if ((dec.kind === "approve" || dec.kind === "increaseAllowance") && (dec.amount ?? 0n) > 0n) { status = "warn"; score = 40; reasonCodes.push("DANGEROUS_APPROVAL"); detail = "ERC20 allowance (sınırlı)"; }
+  const reasonCodes: ReasonCode[] = []; let status: SignalStatus = "ok"; let score = 0; let detail = `call: ${dec.kind}`;
+  if (dec.kind === "setApprovalForAll" && dec.approvedAll) { status = "fail"; score = 90; reasonCodes.push("DANGEROUS_APPROVAL"); detail = "setApprovalForAll(true) — approval over all NFTs"; }
+  else if ((dec.kind === "approve" || dec.kind === "increaseAllowance") && dec.unlimited) { status = "fail"; score = 80; reasonCodes.push("DANGEROUS_APPROVAL"); detail = "unlimited ERC20 allowance"; }
+  else if ((dec.kind === "approve" || dec.kind === "increaseAllowance") && (dec.amount ?? 0n) > 0n) { status = "warn"; score = 40; reasonCodes.push("DANGEROUS_APPROVAL"); detail = "ERC20 allowance (limited)"; }
   return { category: "approvals", status, weight: 0.30, score, source: "calldata-decode", detail, evidence: { reasonCodes } };
 }
 async function txContractRisk(counterparty: string): Promise<SignalResult> {
   const r = await bazaarGet("/api/x402/token-risk", { address: counterparty });
   const p = payload(r); const sec = rec(p?.security);
   if (!p || (!sec && p.upgradeableProxy === undefined && p.isContract === undefined)) return UNKNOWN("contract_risk", "token-risk", r.error ?? "veri yok");
-  if (p.isContract === false) return { category: "contract_risk", status: "ok", weight: 0.20, score: 5, source: "token-risk", detail: "karşı taraf EOA" };
+  if (p.isContract === false) return { category: "contract_risk", status: "ok", weight: 0.20, score: 5, source: "token-risk", detail: "counterparty is an EOA" };
   const reasonCodes: ReasonCode[] = []; let score = 0;
   if (sec?.isHoneypot === true) { score += 60; reasonCodes.push("HONEYPOT_DETECTED"); }
   if (p.upgradeableProxy === true) { score += 20; reasonCodes.push("PROXY_UPGRADEABLE"); }
@@ -207,7 +207,7 @@ async function txContractRisk(counterparty: string): Promise<SignalResult> {
   if (sec?.isOpenSource === false) { score += 30; reasonCodes.push("SOURCE_UNVERIFIED"); }
   score = Math.min(100, score);
   const status: SignalStatus = score >= 70 ? "fail" : score >= 35 ? "warn" : "ok";
-  return { category: "contract_risk", status, weight: 0.20, score, source: "token-risk", detail: reasonCodes.length ? "kontrat risk işaretleri" : "kontrat temiz", evidence: { reasonCodes } };
+  return { category: "contract_risk", status, weight: 0.20, score, source: "token-risk", detail: reasonCodes.length ? "contract risk flags" : "contract clean", evidence: { reasonCodes } };
 }
 
 // ── karar motoru ──────────────────────────────────────────────────
@@ -243,10 +243,10 @@ function decide(signals: SignalResult[]) {
 
 function summarize(d: ReturnType<typeof decide>, signals: SignalResult[]): string {
   const fired = signals.filter((s) => s.status === "fail" || s.status === "warn");
-  const head = d.decision === "block" ? "İşlem engellendi" : d.decision === "review" ? "Manuel inceleme öneriliyor" : "Bilinen risk bulunamadı";
-  if (fired.length === 0) return d.degraded ? `${head}: bazı sinyaller alınamadı, temkinli ol.` : `${head}: temel güvenlik sinyalleri temiz (risk ${d.riskScore}/100).`;
+  const head = d.decision === "block" ? "Blocked" : d.decision === "review" ? "Review recommended" : "No known risk found";
+  if (fired.length === 0) return d.degraded ? `${head}: some signals couldn't be fetched — proceed with caution.` : `${head}: core security signals are clean (risk ${d.riskScore}/100).`;
   const why = fired.map((s) => s.detail ?? s.source).slice(0, 3).join("; ");
-  return `${head} (risk ${d.riskScore}/100). Öne çıkanlar: ${why}.`;
+  return `${head} (risk ${d.riskScore}/100). Highlights: ${why}.`;
 }
 
 function ulid(): string { return Date.now().toString(36) + Math.random().toString(36).slice(2, 10); }
@@ -268,7 +268,7 @@ export async function guardToken(address: string, chainId = 8453): Promise<Verdi
 export async function guardAddress(address: string, chainId = 8453): Promise<Verdict> {
   const started = Date.now();
   const [sanctions, contract] = await Promise.all([
-    bazaarGet("/api/x402/sanctions", { address }).then((r) => sanctionsFrom(r, "adres")),
+    bazaarGet("/api/x402/sanctions", { address }).then((r) => sanctionsFrom(r, "address")),
     txContractRisk(address),
   ]);
   return build({ type: "address", chainId, address }, [sanctions, contract], started);
@@ -279,7 +279,7 @@ export async function guardTx(input: { from: string; to: string; calldata?: stri
   const dec = decodeCalldata(input.calldata);
   const counterparty = dec.spender ?? dec.recipient ?? input.to;
   const [sanctions, contract] = await Promise.all([
-    bazaarGet("/api/x402/sanctions", { address: counterparty }).then((r) => sanctionsFrom(r, "karşı taraf")),
+    bazaarGet("/api/x402/sanctions", { address: counterparty }).then((r) => sanctionsFrom(r, "counterparty")),
     txContractRisk(counterparty),
   ]);
   const signals = [approvalSignal(dec), { ...sanctions, weight: 0.10 }, contract];

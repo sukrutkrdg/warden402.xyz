@@ -5,13 +5,13 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Warden — pre-execution security for agents on Base",
   description:
-    "Bir token, işlem veya adres ver → block / review / clear. Base'de işlem yapan ajanlar için pre-execution güvenlik ve güven katmanı.",
+    "Give a token, transaction or address → block / review / clear. The pre-execution security and trust layer for agents transacting on Base.",
   metadataBase: new URL("https://warden402.xyz"),
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="tr">
+    <html lang="en">
       <body className="min-h-screen font-mono antialiased">
         <header className="border-b border-edge/60">
           <div className="mx-auto flex max-w-5xl items-center justify-between px-5 py-4">
@@ -28,7 +28,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </header>
         <main className="mx-auto max-w-5xl px-5 py-10">{children}</main>
         <footer className="border-t border-edge/60 py-8 text-center text-xs text-slate-500">
-          Warden · Base'de ajan ekonomisi için pre-execution güvenlik katmanı
+          Warden · pre-execution security layer for the agent economy on Base
         </footer>
       </body>
     </html>
