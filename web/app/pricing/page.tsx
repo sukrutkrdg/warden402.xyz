@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CryptoCheckout } from "../components/CryptoCheckout";
 
 export const metadata = {
   title: "Warden — Pricing",
@@ -26,7 +27,7 @@ const TIERS = [
     price: "$299",
     period: "/ month",
     tagline: "For teams running a fleet of agents",
-    cta: { label: "Start with the Firewall", href: "/firewall" },
+    cta: { label: "Pay with crypto", href: "#checkout" },
     highlight: true,
     features: [
       "Everything in Free",
@@ -97,6 +98,10 @@ export default function Pricing() {
             </Link>
           </div>
         ))}
+      </section>
+
+      <section id="checkout" className="mx-auto max-w-md scroll-mt-20">
+        <CryptoCheckout planName="Team — monthly" defaultAmountUsd={299} />
       </section>
 
       <section className="rounded-xl border border-edge bg-panel/60 p-6 text-sm text-slate-400">
