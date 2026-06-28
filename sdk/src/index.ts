@@ -35,6 +35,25 @@ export interface Verdict {
   counterparty?: string;
 }
 
+export interface FirewallResult {
+  auditId: string;
+  agentId: string;
+  decision: "allow" | "hold" | "deny";
+  reasons: string[];
+  detail: string;
+  verdict?: Verdict;
+  budget: {
+    perCallCapUsd: number;
+    hourSpentUsd: number;
+    hourRemainingUsd: number;
+    daySpentUsd: number;
+    dayRemainingUsd: number;
+    approvalsThisHour: number;
+  };
+  committed: boolean;
+  issuedAt: string;
+}
+
 export interface WardenOptions {
   /** API kökü. Varsayılan https://warden402.xyz/api (Next proxy). Lokal: http://localhost:8787 */
   baseUrl?: string;
@@ -94,6 +113,30 @@ export class Warden {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ type: "tx", ...input }),
     });
+  }
+
+  /**
+   * Firewall — policy check for an intended action. Requires an agent key.
+   *   const r = await warden.firewall({ kind:"tx", to, from, calldata }, "agent-key");
+   *   if (r.decision !== "allow") stop();
+   */
+  async firewall(
+    action: { kind: "x402_payment" | "tx"; to: string; amountUsd?: number; from?: string; calldata?: string; value?: string; chainId?: number },
+    agentKey: string,
+  ): Promise<FirewallResult> {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), this.timeoutMs);
+    try {
+      const res = await this.fetchImpl(`${this.baseUrl}/firewall/check`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-warden-agent-key": agentKey },
+        body: JSON.stringify(action),
+        signal: ctrl.signal,
+      });
+      return (await res.json()) as FirewallResult;
+    } finally {
+      clearTimeout(t);
+    }
   }
 
   /** verdict blockOn listesindeyse WardenBlockedError fırlatır, değilse verdict'i döner. */
