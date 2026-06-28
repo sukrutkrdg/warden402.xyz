@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { guardToken } from "./routes/guardToken.js";
 import { guardTx } from "./routes/guardTx.js";
 import { guardAddress } from "./routes/guardAddress.js";
+import { trackRecord } from "./routes/trackRecord.js";
 
 const app = new Hono();
 
@@ -17,6 +18,7 @@ app.get("/", (c) =>
       "GET  /guard/token?address=0x..&chainId=8453",
       "POST /guard/tx           { from, to, calldata, value? }",
       "GET  /guard/address?address=0x..&chainId=8453",
+      "GET  /track-record",
     ],
   }),
 );
@@ -27,6 +29,7 @@ app.get("/health", (c) => c.json({ ok: true, ts: new Date().toISOString() }));
 app.route("/", guardToken);
 app.route("/", guardTx);
 app.route("/", guardAddress);
+app.route("/", trackRecord);
 
 // TODO: x402 ödeme middleware'i (free tier: ilk N çağrı bedava, sonra 402).
 // TODO: MCP server sarmalayıcı.
