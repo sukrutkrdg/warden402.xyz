@@ -1,6 +1,8 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { guardToken } from "./routes/guardToken.js";
+import { guardTx } from "./routes/guardTx.js";
+import { guardAddress } from "./routes/guardAddress.js";
 
 const app = new Hono();
 
@@ -10,18 +12,24 @@ app.get("/", (c) =>
     tagline: "Pre-execution security & trust layer for agents on Base",
     site: "https://warden402.xyz",
     schemaVersion: "0",
-    endpoints: ["GET /health", "GET /guard/token?address=0x..&chainId=8453"],
+    endpoints: [
+      "GET  /health",
+      "GET  /guard/token?address=0x..&chainId=8453",
+      "POST /guard/tx           { from, to, calldata, value? }",
+      "GET  /guard/address?address=0x..&chainId=8453",
+    ],
   }),
 );
 
 app.get("/health", (c) => c.json({ ok: true, ts: new Date().toISOString() }));
 
-// Flagship
+// Flagship + pre-sign + counterparty
 app.route("/", guardToken);
+app.route("/", guardTx);
+app.route("/", guardAddress);
 
-// TODO: x402 ödeme middleware'i buraya (free tier: ilk N çağrı bedava, sonra 402).
-// TODO: /guard/tx ve /guard/address (Faz 2).
-// TODO: MCP server sarmalayıcı (Faz 1 sonu).
+// TODO: x402 ödeme middleware'i (free tier: ilk N çağrı bedava, sonra 402).
+// TODO: MCP server sarmalayıcı.
 
 const port = Number(process.env.PORT ?? 8787);
 serve({ fetch: app.fetch, port }, (info) => {
