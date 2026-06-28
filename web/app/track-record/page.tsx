@@ -37,8 +37,16 @@ export default async function TrackRecord() {
 
   if (!s || s.error) {
     return (
-      <div className="rounded-xl border border-edge bg-panel/60 p-6 text-sm text-slate-400">
-        Track-record verisi şu an alınamıyor. (API: {API})
+      <div className="space-y-4">
+        <h1 className="text-3xl font-bold text-white">Track Record</h1>
+        <div className="rounded-xl border border-edge bg-panel/60 p-6 text-sm text-slate-400">
+          <p className="mb-2 text-slate-300">Henüz yayınlanmış istatistik yok.</p>
+          <p>
+            Her verdict snapshot'lanır ve sonuçları zamanla yeniden ölçülür; bu sayfa
+            kalıcı ledger'a bağlı bir API ile dolar (bkz. <span className="text-warden">DEPLOY.md</span>).
+            Kanıtlanabilir isabet geçmişi — Warden'ın asıl moat'ı — burada görünecek.
+          </p>
+        </div>
       </div>
     );
   }

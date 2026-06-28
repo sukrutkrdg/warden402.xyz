@@ -1,19 +1,40 @@
 # Warden — Deploy
 
-Bu repo **iki ayrı deploy** içerir. Tek bir Vercel projesi ikisini birden çalıştıramaz:
+## ✅ En kolay yol — TEK Vercel projesi (önerilen)
+
+Site, guard mantığını **kendi içinde** çalıştırır; ayrı API host'una gerek YOK.
+
+1. Vercel'de yeni proje → bu repo'yu seç
+2. **Root Directory = `web`**  ← KRİTİK (site bu alt klasörde)
+3. Framework otomatik **Next.js** algılanır
+4. Environment Variables (Production):
+   ```
+   BAZAAR_BASE_URL = https://402.com.tr
+   BAZAAR_INTERNAL_SECRET = <Bazaar'daki WARDEN_INTERNAL_SECRET ile AYNI>
+   ```
+5. Domain `warden402.xyz` → bu projeye bağla → **Deploy**
+
+Bu kadar. Landing + canlı demo (`/api/guard` in-process) çalışır.
+
+### ⚠️ "Site görünmüyor" — en yaygın sebep
+Repo'yu import edince Vercel **kökü** build etmeye çalışır; ama site `web/` altında.
+**Çözüm:** Settings → Build & Deployment → **Root Directory → `web`** → Redeploy.
+
+> Tek-proje modunda track-record kalıcı ledger'a bağlı değildir (Vercel serverless
+> diski geçici). Kanıtlanabilir isabet geçmişi istiyorsan aşağıdaki ayrı API'yi de
+> kur ve web'e `WARDEN_API_URL` ver.
+
+---
+
+## (Opsiyonel) Ayrı Guard API — kalıcı ledger + ajan/SDK/MCP host'u
+
+Repo kökü ayrıca bağımsız bir Hono API'dir (aynı mantık). SDK/MCP'nin işaret ettiği
+kamuya açık API ya da kalıcı track-record için bunu da deploy edebilirsin.
 
 | # | Ne | Klasör | Vercel "Root Directory" |
 |---|-----|--------|--------------------------|
-| 1 | **Web sitesi** (landing + demo + track-record) | `web/` | `web` |
-| 2 | **Guard API** (Hono) | repo kökü | `.` (kök) |
-
-## ⚠️ "Site görünmüyor" — en yaygın sebep
-
-Repo'yu Vercel'e olduğu gibi import edersen Vercel **kökü** build etmeye çalışır — ama
-kök bir Next sitesi değil, Hono API'dir. **Site `web/` altında.**
-
-**Çözüm:** Vercel → proje → Settings → **Build & Deployment → Root Directory → `web`** yap,
-sonra **Redeploy** et. Site artık landing'i gösterir.
+| 1 | Web sitesi | `web/` | `web` |
+| 2 | Guard API (Hono) | repo kökü | `.` (kök) |
 
 ## 1) Web sitesi (warden402.xyz)
 
