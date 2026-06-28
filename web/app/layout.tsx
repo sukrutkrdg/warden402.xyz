@@ -1,18 +1,69 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import "./globals.css";
+import { getBaseAppId, getSiteUrl } from "./lib/site";
+import FarcasterReady from "./components/FarcasterReady";
+
+const SITE_URL = getSiteUrl();
+const baseAppId = getBaseAppId();
+
+// Farcaster / Base App Mini App embed — renders the URL as a launchable card.
+const miniappEmbed = {
+  version: "1",
+  imageUrl: `${SITE_URL}/brand/embed`,
+  button: {
+    title: "Open Warden",
+    action: {
+      type: "launch_miniapp",
+      url: SITE_URL,
+      name: "Warden",
+      splashImageUrl: `${SITE_URL}/brand/splash`,
+      splashBackgroundColor: "#0a0e14",
+    },
+  },
+};
+const frameEmbed = {
+  ...miniappEmbed,
+  button: { ...miniappEmbed.button, action: { ...miniappEmbed.button.action, type: "launch_frame" } },
+};
 
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: "Warden — pre-execution security for agents on Base",
   description:
     "Give a token, transaction or address → block / review / clear. The pre-execution security and trust layer for agents transacting on Base.",
-  metadataBase: new URL("https://warden402.xyz"),
+  applicationName: "Warden",
+  alternates: { canonical: SITE_URL },
+  openGraph: {
+    type: "website",
+    siteName: "Warden",
+    url: SITE_URL,
+    title: "Warden — pre-execution security for agents on Base",
+    description: "block / review / clear before your agent signs. Token, transaction and address safety on Base.",
+    images: [{ url: `${SITE_URL}/brand/embed`, width: 1200, height: 800 }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Warden — pre-execution security for agents on Base",
+    description: "block / review / clear before your agent signs.",
+    images: [`${SITE_URL}/brand/embed`],
+  },
+  other: {
+    // Base App verification / discovery tag (distinct from any Builder Code).
+    ...(baseAppId ? { "base:app_id": baseAppId } : {}),
+    // Farcaster Mini App embed (fc:frame kept for backward compatibility).
+    "fc:miniapp": JSON.stringify(miniappEmbed),
+    "fc:frame": JSON.stringify(frameEmbed),
+  },
 };
+
+export const viewport = { themeColor: "#0a0e14" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body className="min-h-screen font-mono antialiased">
+        <FarcasterReady />
         <header className="border-b border-edge/60">
           <div className="mx-auto flex max-w-5xl items-center justify-between px-5 py-4">
             <Link href="/" className="flex items-center gap-2 font-semibold">
