@@ -41,9 +41,15 @@ export async function POST(req: NextRequest) {
 
   const { key, record } = await createAgent(agentId, {}, { plan, expiresAt, payer: v.from, txHash: hash });
 
-  // 4) lookup record for support / renewals
+  // 4) lookup record for support / renewals + revenue log
   if (PERSISTENT) {
-    try { await kvPipeline([["SET", `sub:payer:${(v.from ?? "").toLowerCase()}`, JSON.stringify({ key, plan, expiresAt, txHash: hash, agentId })]]); } catch { /* best effort */ }
+    try {
+      await kvPipeline([
+        ["SET", `sub:payer:${(v.from ?? "").toLowerCase()}`, JSON.stringify({ key, plan, expiresAt, txHash: hash, agentId })],
+        ["LPUSH", "sub:log", JSON.stringify({ payer: v.from, plan, amountUsd: Math.round(usd), token: v.token, txHash: hash, agentId, at: new Date().toISOString() })],
+        ["LTRIM", "sub:log", 0, 499],
+      ]);
+    } catch { /* best effort */ }
   }
 
   return NextResponse.json({ key, agentId, plan, monthlyCap: record.monthlyCap, expiresAt });

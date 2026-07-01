@@ -43,9 +43,61 @@ export async function createAgent(
     plan, monthlyCap: PLAN_CAP[plan], expiresAt: opts.expiresAt, payer: opts.payer, txHash: opts.txHash,
   };
   const val = JSON.stringify(record);
-  if (PERSISTENT) { try { await kvPipeline([["SET", `fw:agent:${key}`, val]]); return { key, record }; } catch { /* fall */ } }
+  if (PERSISTENT) { try { await kvPipeline([["SET", `fw:agent:${key}`, val], ["SADD", "fw:index", key]]); return { key, record }; } catch { /* fall */ } }
   mem.agents.set(key, val);
   return { key, record };
+}
+
+async function saveAgent(key: string, record: AgentRecord) {
+  const val = JSON.stringify(record);
+  if (PERSISTENT) { try { await kvPipeline([["SET", `fw:agent:${key}`, val]]); return; } catch { /* fall */ } }
+  mem.agents.set(key, val);
+}
+
+// ── admin ─────────────────────────────────────────────────────────
+export interface AdminAgent { key: string; agentId: string; plan: string; monthlyCap: number; expiresAt: string | null; paused: boolean; payer?: string; txHash?: string; createdAt: string; checksUsed: number }
+export async function listAllAgents(): Promise<AdminAgent[]> {
+  let keys: string[] = [];
+  if (PERSISTENT) { try { const [k] = await kvPipeline([["SMEMBERS", "fw:index"]]); keys = (k as string[]) ?? []; } catch { /* fall */ } }
+  if (!keys.length) keys = [...mem.agents.keys()];
+  const out: AdminAgent[] = [];
+  for (const key of keys) {
+    const rec = await getAgent(key);
+    if (!rec) continue;
+    const used = await num(["GET", `fw:checks:${rec.agentId}:m:${monthEpoch()}`], `fw:checks:${rec.agentId}:m:${monthEpoch()}`);
+    out.push({ key: key.slice(0, 10) + "…", agentId: rec.agentId, plan: rec.plan, monthlyCap: rec.monthlyCap, expiresAt: rec.expiresAt ?? null, paused: rec.policy.paused, payer: rec.payer, txHash: rec.txHash, createdAt: rec.createdAt, checksUsed: used });
+  }
+  return out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+}
+
+/** Find the full key from a masked prefix (admin actions pass the prefix). */
+async function resolveKey(prefix: string): Promise<string | null> {
+  const p = prefix.replace(/…$/, "");
+  let keys: string[] = [];
+  if (PERSISTENT) { try { const [k] = await kvPipeline([["SMEMBERS", "fw:index"]]); keys = (k as string[]) ?? []; } catch { /* fall */ } }
+  if (!keys.length) keys = [...mem.agents.keys()];
+  return keys.find((k) => k.startsWith(p)) ?? null;
+}
+
+export async function adminUpdate(keyPrefix: string, patch: { plan?: AgentRecord["plan"]; extendDays?: number; paused?: boolean; monthlyCap?: number }): Promise<{ ok: boolean }> {
+  const key = await resolveKey(keyPrefix);
+  if (!key) return { ok: false };
+  const rec = await getAgent(key);
+  if (!rec) return { ok: false };
+  if (patch.plan) { rec.plan = patch.plan; rec.monthlyCap = PLAN_CAP[patch.plan]; }
+  if (patch.monthlyCap !== undefined) rec.monthlyCap = patch.monthlyCap;
+  if (patch.extendDays) { const base = rec.expiresAt && Date.now() < new Date(rec.expiresAt).getTime() ? new Date(rec.expiresAt).getTime() : Date.now(); rec.expiresAt = new Date(base + patch.extendDays * 86_400_000).toISOString(); }
+  if (patch.paused !== undefined) rec.policy = { ...rec.policy, paused: patch.paused };
+  await saveAgent(key, rec);
+  return { ok: true };
+}
+
+export async function revokeAgent(keyPrefix: string): Promise<{ ok: boolean }> {
+  const key = await resolveKey(keyPrefix);
+  if (!key) return { ok: false };
+  if (PERSISTENT) { try { await kvPipeline([["DEL", `fw:agent:${key}`], ["SREM", "fw:index", key]]); return { ok: true }; } catch { /* fall */ } }
+  mem.agents.delete(key);
+  return { ok: true };
 }
 
 export async function getAgent(key: string | undefined): Promise<AgentRecord | null> {
