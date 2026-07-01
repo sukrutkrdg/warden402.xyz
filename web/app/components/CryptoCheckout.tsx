@@ -15,6 +15,7 @@ export function CryptoCheckout({ planName, defaultAmountUsd }: { planName: strin
   const [connecting, setConnecting] = useState(false);
   const [verified, setVerified] = useState<{ token: string; amount: number } | null>(null);
   const [unconfirmed, setUnconfirmed] = useState(false);
+  const [sub, setSub] = useState<{ key: string; plan: string; expiresAt: string } | null>(null);
 
   async function onConnect() {
     setConnecting(true); setError("");
@@ -49,6 +50,11 @@ export function CryptoCheckout({ planName, defaultAmountUsd }: { planName: strin
         if (v?.error && v.error !== "not_found" && v.error !== "not_confirmed") break; // definitive failure
       }
       if (!ok) setUnconfirmed(true);
+      else {
+        // Redeem the payment → issue an agent key with plan quota + expiry.
+        const s = await fetch("/api/subscribe", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ txHash: hash }) }).then((r) => r.json()).catch(() => null);
+        if (s?.key) setSub({ key: s.key, plan: s.plan, expiresAt: s.expiresAt });
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : (e as { message?: string })?.message ?? String(e);
       setError(msg === "[object Object]" ? "Wallet request failed or was rejected." : msg);
@@ -126,7 +132,15 @@ export function CryptoCheckout({ planName, defaultAmountUsd }: { planName: strin
             ? "Not confirmed. The transaction may have failed or reverted (e.g. insufficient balance) — no plan was activated."
             : "Transaction submitted — confirming on-chain…"}{" "}
           <a href={explorerTx(txHash)} target="_blank" rel="noreferrer" className="underline">View on BaseScan</a>
-          {verified && <p className="mt-1 text-xs text-slate-400">Your plan is being activated — we&apos;ll reach out at your contact email.</p>}
+          {verified && !sub && <p className="mt-1 text-xs text-slate-400">Activating your plan…</p>}
+        </div>
+      )}
+      {sub && (
+        <div className="mt-3 rounded-lg border border-warden/40 bg-warden/5 p-3 text-sm">
+          <div className="text-warden">Plan active: <span className="font-semibold uppercase">{sub.plan}</span> · until {new Date(sub.expiresAt).toLocaleDateString("en-US")}</div>
+          <div className="mt-2 text-xs uppercase tracking-widest text-slate-500">Your agent key — store it</div>
+          <code className="mt-1 block break-all rounded bg-ink p-2 font-mono text-xs text-warden">{sub.key}</code>
+          <p className="mt-1 text-xs text-slate-500">Use it as <span className="text-slate-300">x-warden-agent-key</span> on /api/v1/check.</p>
         </div>
       )}
       {status === "error" && <div className="mt-4 rounded-lg border border-block/30 bg-block/5 p-3 text-sm text-block">{error}</div>}

@@ -22,12 +22,26 @@ const dayEpoch = () => Math.floor(Date.now() / 86_400_000);
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 export const genKey = () => "wk_" + Array.from(crypto.getRandomValues(new Uint8Array(20))).map((b) => b.toString(16).padStart(2, "0")).join("");
 
-interface AgentRecord { agentId: string; policy: AgentPolicy; createdAt: string }
+export interface AgentRecord {
+  agentId: string; policy: AgentPolicy; createdAt: string;
+  plan: "free" | "starter" | "team" | "enterprise";
+  monthlyCap: number; expiresAt?: string; payer?: string; txHash?: string;
+}
+
+export const PLAN_CAP: Record<AgentRecord["plan"], number> = { free: 1000, starter: 20000, team: 100000, enterprise: 5_000_000 };
 
 // ── agent registry ────────────────────────────────────────────────
-export async function createAgent(agentId: string, policyPatch: Partial<AgentPolicy> = {}): Promise<{ key: string; record: AgentRecord }> {
+export async function createAgent(
+  agentId: string,
+  policyPatch: Partial<AgentPolicy> = {},
+  opts: { plan?: AgentRecord["plan"]; expiresAt?: string; payer?: string; txHash?: string } = {},
+): Promise<{ key: string; record: AgentRecord }> {
   const key = genKey();
-  const record: AgentRecord = { agentId, policy: { agentId, ...DEFAULT_POLICY, ...policyPatch }, createdAt: new Date().toISOString() };
+  const plan = opts.plan ?? "free";
+  const record: AgentRecord = {
+    agentId, policy: { agentId, ...DEFAULT_POLICY, ...policyPatch }, createdAt: new Date().toISOString(),
+    plan, monthlyCap: PLAN_CAP[plan], expiresAt: opts.expiresAt, payer: opts.payer, txHash: opts.txHash,
+  };
   const val = JSON.stringify(record);
   if (PERSISTENT) { try { await kvPipeline([["SET", `fw:agent:${key}`, val]]); return { key, record }; } catch { /* fall */ } }
   mem.agents.set(key, val);
@@ -48,6 +62,18 @@ async function num(cmd: (string | number)[], memKey: string): Promise<number> {
   if (PERSISTENT) { try { const [v] = await kvPipeline([cmd]); return Number(v ?? 0); } catch { /* fall */ } }
   return Number(mem.kv.get(memKey) ?? 0);
 }
+const monthEpoch = () => Math.floor(Date.now() / 2_592_000_000);
+async function incrMonthly(id: string): Promise<number> {
+  const k = `fw:checks:${id}:m:${monthEpoch()}`;
+  if (PERSISTENT) { try { const [v] = await kvPipeline([["INCR", k], ["EXPIRE", k, 2_764_800]]); return Number(v ?? 1); } catch { /* fall */ } }
+  const cur = Number(mem.kv.get(k) ?? 0) + 1; mem.kv.set(k, String(cur)); return cur;
+}
+export async function getUsage(record: AgentRecord) {
+  const used = await num(["GET", `fw:checks:${record.agentId}:m:${monthEpoch()}`], `fw:checks:${record.agentId}:m:${monthEpoch()}`);
+  const expired = record.expiresAt ? Date.now() > new Date(record.expiresAt).getTime() : false;
+  return { plan: record.plan, monthlyCap: record.monthlyCap, checksUsed: used, checksRemaining: Math.max(0, record.monthlyCap - used), expiresAt: record.expiresAt ?? null, expired };
+}
+
 async function seen(id: string, addr: string): Promise<boolean> {
   const a = addr.toLowerCase();
   if (PERSISTENT) { try { const [v] = await kvPipeline([["SISMEMBER", `fw:seen:${id}`, a]]); return Number(v) === 1; } catch { /* fall */ } }
@@ -92,6 +118,18 @@ export async function checkKv(record: AgentRecord, action: FirewallAction): Prom
   const id = record.agentId, p = record.policy;
   const amount = action.amountUsd ?? 0;
   const h = hourEpoch(), d = dayEpoch();
+
+  // Entitlement enforcement (plan expiry + monthly quota) — before any upstream call.
+  const emptyBudget = { perCallCapUsd: p.maxPerCallUsd, hourSpentUsd: 0, hourRemainingUsd: p.maxPerHourUsd, daySpentUsd: 0, dayRemainingUsd: p.maxPerDayUsd, approvalsThisHour: 0 };
+  const denyEntitlement = (reasons: string[], detail: string): FirewallResult =>
+    ({ auditId: uid(), agentId: id, decision: "deny", reasons, detail, budget: emptyBudget, committed: false, issuedAt: new Date().toISOString() });
+  if (record.expiresAt && Date.now() > new Date(record.expiresAt).getTime()) {
+    return denyEntitlement(["PLAN_EXPIRED"], "Subscription expired — renew to continue.");
+  }
+  const used = await incrMonthly(id);
+  if (used > record.monthlyCap) {
+    return denyEntitlement(["PLAN_LIMIT"], `Monthly check limit reached (${record.monthlyCap}). Upgrade your plan.`);
+  }
 
   let verdict; let isApproval = false; let unlimited = false;
   if (action.kind === "tx") {
