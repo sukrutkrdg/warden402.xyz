@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { PAY_TO, explorerTx, pay, type PayToken } from "../lib/pay";
+import { PAY_TO, connect, explorerTx, pay, type PayToken } from "../lib/pay";
 
 export function CryptoCheckout({ planName, defaultAmountUsd }: { planName: string; defaultAmountUsd: number }) {
   const [token, setToken] = useState<PayToken>("USDC");
@@ -11,7 +11,16 @@ export function CryptoCheckout({ planName, defaultAmountUsd }: { planName: strin
   const [txHash, setTxHash] = useState<string>("");
   const [error, setError] = useState<string>("");
   const [hasWallet, setHasWallet] = useState<boolean | null>(null);
+  const [account, setAccount] = useState<string>("");
+  const [connecting, setConnecting] = useState(false);
   const [verified, setVerified] = useState<{ token: string; amount: number } | null>(null);
+
+  async function onConnect() {
+    setConnecting(true); setError("");
+    try { setAccount(await connect()); }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setConnecting(false); }
+  }
 
   useEffect(() => {
     setHasWallet(typeof window !== "undefined" && Boolean((window as { ethereum?: unknown }).ethereum));
@@ -90,11 +99,19 @@ export function CryptoCheckout({ planName, defaultAmountUsd }: { planName: strin
           or <a href="https://metamask.io/download/" target="_blank" rel="noreferrer" className="underline">MetaMask</a>, then reload.
           <p className="mt-1 text-xs text-slate-500">On mobile, open warden402.xyz inside your wallet app&apos;s browser.</p>
         </div>
-      ) : (
-        <button onClick={onPay} disabled={status === "paying"}
-          className="mt-5 w-full rounded-lg bg-warden px-4 py-3 text-sm font-semibold text-ink transition hover:brightness-110 disabled:opacity-50">
-          {status === "paying" ? "Confirm in your wallet…" : `Pay ${token} on Base`}
+      ) : !account ? (
+        <button onClick={onConnect} disabled={connecting}
+          className="mt-5 w-full rounded-lg border border-warden bg-warden/10 px-4 py-3 text-sm font-semibold text-warden transition hover:bg-warden/20 disabled:opacity-50">
+          {connecting ? "Opening wallet…" : "Connect wallet"}
         </button>
+      ) : (
+        <>
+          <div className="mt-4 text-xs text-slate-500">connected: <span className="font-mono text-slate-300">{account.slice(0, 6)}…{account.slice(-4)}</span></div>
+          <button onClick={onPay} disabled={status === "paying"}
+            className="mt-2 w-full rounded-lg bg-warden px-4 py-3 text-sm font-semibold text-ink transition hover:brightness-110 disabled:opacity-50">
+            {status === "paying" ? "Confirm in your wallet…" : `Pay ${token} on Base`}
+          </button>
+        </>
       )}
 
       {status === "success" && (

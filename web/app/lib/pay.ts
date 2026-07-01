@@ -13,10 +13,17 @@ export type PayToken = "USDC" | "ETH";
 
 interface Eip1193 {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+  providers?: Eip1193[];
+  isMetaMask?: boolean;
+  isCoinbaseWallet?: boolean;
 }
 function provider(): Eip1193 {
-  const eth = (globalThis as { ethereum?: Eip1193 }).ethereum;
-  if (!eth) throw new Error("No wallet found. Install MetaMask or Coinbase Wallet.");
+  let eth = (globalThis as { ethereum?: Eip1193 }).ethereum;
+  if (!eth) throw new Error("No wallet found. Install MetaMask or Coinbase Wallet, then reload.");
+  // Multiple injected wallets → pick a usable one.
+  if (Array.isArray(eth.providers) && eth.providers.length) {
+    eth = eth.providers.find((p) => p.isMetaMask) ?? eth.providers.find((p) => p.isCoinbaseWallet) ?? eth.providers[0]!;
+  }
   return eth;
 }
 
@@ -30,8 +37,17 @@ function encodeTransfer(to: string, amount: bigint): string {
 }
 
 export async function connect(): Promise<string> {
-  const accs = (await provider().request({ method: "eth_requestAccounts" })) as string[];
-  if (!accs?.length) throw new Error("No account selected.");
+  const eth = provider();
+  let accs: string[] = [];
+  try {
+    accs = ((await eth.request({ method: "eth_requestAccounts" })) as string[]) ?? [];
+  } catch (e) {
+    const err = e as { code?: number; message?: string };
+    if (err?.code === 4001) throw new Error("Connection request rejected in wallet.");
+    throw new Error(err?.message || "Could not open the wallet. Unlock it and try again.");
+  }
+  if (!accs.length) accs = ((await eth.request({ method: "eth_accounts" })) as string[]) ?? [];
+  if (!accs.length) throw new Error("Your wallet has no account. Unlock it or create/import an account, then retry.");
   return accs[0]!;
 }
 
