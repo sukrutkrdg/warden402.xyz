@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { check, getAudit, getBudget, getPolicy, resetAgent, setPolicy } from "../../lib/firewall";
+import { clientIp, rateLimit } from "../../lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,8 @@ export async function POST(req: NextRequest) {
   if (!a || !/^0x[a-fA-F0-9]{40}$/.test(a.to ?? "")) {
     return NextResponse.json({ error: "invalid action (need to: 0x..40hex)" }, { status: 400 });
   }
+  const rl = rateLimit(`fw:${clientIp(req)}`, Number(process.env.WARDEN_RATE_LIMIT ?? 30), 60_000);
+  if (!rl.ok) return NextResponse.json({ error: "rate_limited", detail: `retry in ${rl.retryAfterSec}s` }, { status: 429, headers: { "retry-after": String(rl.retryAfterSec) } });
   const result = await check(a);
   return NextResponse.json({ result, budget: getBudget(), audit: getAudit() });
 }
