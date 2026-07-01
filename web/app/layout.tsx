@@ -73,6 +73,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <nav className="flex items-center gap-5 text-sm text-slate-400">
               <Link href="/" className="hover:text-white">Guard</Link>
               <Link href="/firewall" className="hover:text-white">Firewall</Link>
+              <Link href="/dashboard" className="hover:text-white">Dashboard</Link>
               <Link href="/pricing" className="hover:text-white">Pricing</Link>
               <Link href="/track-record" className="hover:text-white">Track Record</Link>
               <a href="https://github.com/sukrutkrdg/warden402.xyz" className="hover:text-white" target="_blank" rel="noreferrer">GitHub</a>

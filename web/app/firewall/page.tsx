@@ -64,6 +64,7 @@ export default function FirewallPage() {
           <span className="text-clear">allow</span> · <span className="text-review">hold</span> · <span className="text-block">deny</span>{" "}
           and the budget move in real time. Real customers get their own isolated agent, key, budget and audit.
         </p>
+        <a href="/dashboard" className="inline-block text-xs text-warden underline hover:brightness-110">See the full fleet dashboard →</a>
         <FirewallPlayground />
       </section>
 

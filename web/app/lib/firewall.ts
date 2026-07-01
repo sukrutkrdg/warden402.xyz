@@ -67,15 +67,17 @@ export interface FirewallResult {
 }
 
 interface SpendEvent { ts: number; amountUsd: number; counterparty: string; isApproval: boolean }
-interface AgentState { policy: AgentPolicy; spends: SpendEvent[]; calls: number[]; seen: Set<string>; audit: FirewallResult[] }
+export interface Hold { id: string; agentId: string; action: FirewallAction; result: FirewallResult; createdAt: string; status: "pending" | "approved" | "rejected" }
+interface AgentState { policy: AgentPolicy; spends: SpendEvent[]; calls: number[]; seen: Set<string>; audit: FirewallResult[]; holds: Hold[]; label: string }
 
+const USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 const HOUR = 3_600_000, DAY = 86_400_000;
 const g = globalThis as unknown as { __wardenFw?: Map<string, AgentState> };
 const agents: Map<string, AgentState> = g.__wardenFw ?? (g.__wardenFw = new Map());
 
 function agent(id = "demo"): AgentState {
   let s = agents.get(id);
-  if (!s) { s = { policy: { agentId: id, ...DEFAULT_POLICY }, spends: [], calls: [], seen: new Set(), audit: [] }; agents.set(id, s); }
+  if (!s) { s = { policy: { agentId: id, ...DEFAULT_POLICY }, spends: [], calls: [], seen: new Set(), audit: [], holds: [], label: id }; agents.set(id, s); }
   return s;
 }
 function prune(s: AgentState) { const n = Date.now(); s.spends = s.spends.filter((e) => n - e.ts < DAY); s.calls = s.calls.filter((t) => n - t < 60_000); }
@@ -115,6 +117,10 @@ export async function check(action: FirewallAction, id = "demo"): Promise<Firewa
     const r: FirewallResult = { auditId: uid(), agentId: id, decision, reasons, detail, verdict, budget: getBudget(id), committed, issuedAt: new Date().toISOString() };
     s.audit.unshift(r);
     s.audit = s.audit.slice(0, 50);
+    if (decision === "hold") {
+      s.holds.unshift({ id: uid(), agentId: id, action, result: r, createdAt: r.issuedAt, status: "pending" });
+      s.holds = s.holds.slice(0, 50);
+    }
     return r;
   };
 
@@ -156,4 +162,78 @@ export async function check(action: FirewallAction, id = "demo"): Promise<Firewa
   s.spends.push({ ts: Date.now(), amountUsd: amount, counterparty: action.to.toLowerCase(), isApproval });
   s.seen.add(action.to.toLowerCase());
   return fin("allow", allowed ? "Allowlisted, within policy." : "Within policy.", true, verdict);
+}
+
+// ── dashboard (multi-agent) ───────────────────────────────────────
+export function pendingHolds(id = "demo") { return agent(id).holds.filter((h) => h.status === "pending"); }
+
+export function approveHold(holdId: string, id = "demo") {
+  const s = agent(id);
+  const h = s.holds.find((x) => x.id === holdId);
+  if (!h || h.status !== "pending") return { ok: false };
+  h.status = "approved";
+  const amt = h.action.amountUsd ?? 0;
+  s.spends.push({ ts: Date.now(), amountUsd: amt, counterparty: h.action.to.toLowerCase(), isApproval: h.action.kind === "tx" });
+  s.seen.add(h.action.to.toLowerCase());
+  return { ok: true };
+}
+export function rejectHold(holdId: string, id = "demo") {
+  const h = agent(id).holds.find((x) => x.id === holdId);
+  if (!h || h.status !== "pending") return { ok: false };
+  h.status = "rejected";
+  return { ok: true };
+}
+
+export interface AgentSummary { agentId: string; label: string; paused: boolean; budget: ReturnType<typeof getBudget>; pending: number; lastDecision?: FirewallDecision }
+export function listAgents(): AgentSummary[] {
+  return [...agents.values()].map((s) => ({
+    agentId: s.policy.agentId,
+    label: s.label,
+    paused: s.policy.paused,
+    budget: getBudget(s.policy.agentId),
+    pending: s.holds.filter((h) => h.status === "pending").length,
+    lastDecision: s.audit[0]?.decision,
+  }));
+}
+
+/** Hourly spend buckets for a chart (last `hours`). */
+export function spendSeries(id = "demo", hours = 12): { label: string; usd: number }[] {
+  const s = agent(id);
+  const now = Date.now();
+  const buckets: { label: string; usd: number }[] = [];
+  for (let i = hours - 1; i >= 0; i--) {
+    const start = now - (i + 1) * HOUR, end = now - i * HOUR;
+    const usd = s.spends.filter((e) => e.ts >= start && e.ts < end).reduce((a, e) => a + e.amountUsd, 0);
+    buckets.push({ label: `${new Date(end).getHours()}:00`, usd: Math.round(usd * 100) / 100 });
+  }
+  return buckets;
+}
+
+/** Seed a few demo agents with lifelike history so the dashboard is never empty. */
+export function seedDashboard() {
+  if (agents.size > 1 || (agents.size === 1 && agents.get("demo")!.spends.length > 0)) return;
+  const now = Date.now();
+  const mk = (id: string, label: string, policy: Partial<AgentPolicy>, spends: [number, number][], pending?: FirewallAction) => {
+    const s = agent(id);
+    s.label = label;
+    s.policy = { ...s.policy, ...policy };
+    for (const [hoursAgo, amt] of spends) {
+      s.spends.push({ ts: now - hoursAgo * HOUR, amountUsd: amt, counterparty: USDC.toLowerCase(), isApproval: false });
+      s.seen.add(USDC.toLowerCase());
+      s.audit.unshift({ auditId: uid(), agentId: id, decision: "allow", reasons: ["WITHIN_POLICY"], detail: "Within policy.", budget: getBudget(id), committed: true, issuedAt: new Date(now - hoursAgo * HOUR).toISOString() });
+    }
+    if (pending) {
+      const res: FirewallResult = { auditId: uid(), agentId: id, decision: "hold", reasons: ["NEW_COUNTERPARTY"], detail: "Needs approval: NEW_COUNTERPARTY", budget: getBudget(id), committed: false, issuedAt: new Date().toISOString() };
+      s.holds.unshift({ id: uid(), agentId: id, action: pending, result: res, createdAt: res.issuedAt, status: "pending" });
+      s.audit.unshift(res);
+    }
+  };
+  mk("trader-1", "Trading bot", { maxPerHourUsd: 200, maxPerDayUsd: 1000 },
+    [[5, 42], [4, 18], [3, 63], [2, 9], [1, 27], [0.2, 88]],
+    { kind: "x402_payment", to: "0x00000000219ab540356cBB839Cbe05303d7705Fa", amountUsd: 35 });
+  mk("payments-2", "Payments agent", { maxPerHourUsd: 100 },
+    [[6, 12], [3, 8], [1, 15], [0.15, 22]]);
+  mk("defi-3", "DeFi automation", { maxPerHourUsd: 150, denyUnlimitedApprovals: true },
+    [[4, 55], [2, 40], [0.3, 61]],
+    { kind: "tx", to: USDC, from: USDC, amountUsd: 0 });
 }
