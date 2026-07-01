@@ -178,7 +178,7 @@ interface Decoded { selector: string; kind: string; spender?: string; recipient?
 function w(d: string, i: number) { const s = 2 + 8 + i * 64; return d.slice(s, s + 64); }
 function addr(x: string) { return "0x" + x.slice(24); }
 function big(x: string) { return x ? BigInt("0x" + x) : 0n; }
-function decodeCalldata(calldata?: string): Decoded {
+export function decodeCalldata(calldata?: string): Decoded {
   const d = (calldata ?? "").toLowerCase();
   if (!d.startsWith("0x") || d.length < 10) return { selector: "0x", kind: "unknown" };
   const sel = d.slice(0, 10);
@@ -211,7 +211,7 @@ async function txContractRisk(counterparty: string): Promise<SignalResult> {
 }
 
 // ── karar motoru ──────────────────────────────────────────────────
-function decide(signals: SignalResult[]) {
+export function decide(signals: SignalResult[]) {
   const fails: ReasonCode[] = []; const warns: ReasonCode[] = [];
   for (const s of signals) {
     const codes = (s.evidence?.reasonCodes as ReasonCode[] | undefined) ?? [];
