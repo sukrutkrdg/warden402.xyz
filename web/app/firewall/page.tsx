@@ -68,6 +68,14 @@ export default function FirewallPage() {
         <FirewallPlayground />
       </section>
 
+      <section className="flex flex-col items-start gap-3 rounded-xl border border-warden/30 bg-warden/5 p-6 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-white">Ready to protect a real agent?</h2>
+          <p className="mt-1 text-sm text-slate-400">Get a key and gate every action with one call. Free during early access.</p>
+        </div>
+        <a href="/onboard" className="shrink-0 rounded-lg bg-warden px-5 py-3 text-sm font-semibold text-ink transition hover:brightness-110">Get an agent key →</a>
+      </section>
+
       <section className="rounded-xl border border-edge bg-panel/60 p-5 text-sm">
         <h3 className="mb-2 text-sm uppercase tracking-widest text-slate-500">For agents — API</h3>
         <pre className="overflow-x-auto text-slate-300">

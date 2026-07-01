@@ -108,6 +108,46 @@ export function getBudget(id = "demo") {
   };
 }
 
+// ── PURE policy decision (single source of truth; used by in-memory + KV) ──
+export interface PolicyCtx {
+  action: FirewallAction; verdict: Verdict; isApproval: boolean; unlimited: boolean;
+  allowlisted: boolean; callsMin: number; hourSpent: number; daySpent: number;
+  approvalsHour: number; seen: boolean; medianSpend?: number;
+}
+export interface PolicyOutcome { decision: FirewallDecision; reasons: string[]; detail: string; commit: boolean }
+
+export function decidePolicy(p: AgentPolicy, c: PolicyCtx): PolicyOutcome {
+  const reasons: string[] = [];
+  const amount = c.action.amountUsd ?? 0;
+  const deny = (r: string[], detail: string): PolicyOutcome => ({ decision: "deny", reasons: r, detail, commit: false });
+  const hold = (r: string[], detail: string): PolicyOutcome => ({ decision: "hold", reasons: r, detail, commit: false });
+
+  if (p.paused) return deny(["KILL_SWITCH"], "Agent is paused (kill switch).");
+  if (c.callsMin > p.maxCallsPerMinute) return deny(["RATE_LIMITED"], `Rate limit: ${c.callsMin} calls/min.`);
+  if (inList(p.deny, c.action.to)) return deny(["DENYLISTED"], "Counterparty is on the deny-list.");
+
+  if (c.verdict.decision === "block") return deny(["UNSAFE_TARGET"], "Guard flagged the target as unsafe (block).");
+  if (c.verdict.decision === "review" && p.blockOnReview && !c.allowlisted) reasons.push("TARGET_REVIEW");
+
+  if (c.action.kind === "tx") {
+    if (c.unlimited && p.denyUnlimitedApprovals) return deny(["UNLIMITED_APPROVAL"], "Unlimited token approval is denied by policy.");
+    if (c.isApproval && c.approvalsHour >= p.maxApprovalsPerHour) return hold(["APPROVAL_RATE"], `Approval rate cap reached (${p.maxApprovalsPerHour}/hour).`);
+  }
+
+  if (amount > p.maxPerCallUsd) return deny(["OVER_PER_CALL"], `Amount $${amount} exceeds per-call cap $${p.maxPerCallUsd}.`);
+  if (c.hourSpent + amount > p.maxPerHourUsd) return deny(["OVER_HOURLY"], `Would exceed hourly cap $${p.maxPerHourUsd}.`);
+  if (c.daySpent + amount > p.maxPerDayUsd) return deny(["OVER_DAILY"], `Would exceed daily cap $${p.maxPerDayUsd}.`);
+
+  if (!c.allowlisted && p.holdOnNewCounterparty && !c.seen) reasons.push("NEW_COUNTERPARTY");
+  if (!c.allowlisted && amount > 0 && c.medianSpend !== undefined && amount > c.medianSpend * p.anomalyMultiplier) reasons.push("ANOMALY_SPIKE");
+
+  if (["TARGET_REVIEW", "NEW_COUNTERPARTY", "ANOMALY_SPIKE"].some((r) => reasons.includes(r)))
+    return hold(reasons, "Needs approval: " + reasons.join(", "));
+
+  reasons.push(c.allowlisted ? "ALLOWLISTED" : "WITHIN_POLICY");
+  return { decision: "allow", reasons, detail: c.allowlisted ? "Allowlisted, within policy." : "Within policy.", commit: true };
+}
+
 export async function check(action: FirewallAction, id = "demo"): Promise<FirewallResult> {
   const s = agent(id); prune(s);
   const p = s.policy;
@@ -124,11 +164,8 @@ export async function check(action: FirewallAction, id = "demo"): Promise<Firewa
     return r;
   };
 
-  if (p.paused) { reasons.push("KILL_SWITCH"); return fin("deny", "Agent is paused (kill switch)."); }
   s.calls.push(Date.now());
-  if (s.calls.length > p.maxCallsPerMinute) { reasons.push("RATE_LIMITED"); return fin("deny", `Rate limit: ${s.calls.length} calls/min.`); }
-  if (inList(p.deny, action.to)) { reasons.push("DENYLISTED"); return fin("deny", "Counterparty is on the deny-list."); }
-  const allowed = inList(p.allow, action.to);
+  const allowlisted = inList(p.allow, action.to);
 
   // Guard verdict on the target
   let verdict: Verdict; let isApproval = false; let unlimited = false;
@@ -140,28 +177,20 @@ export async function check(action: FirewallAction, id = "demo"): Promise<Firewa
   } else {
     verdict = await guardAddress(action.to);
   }
-  if (verdict.decision === "block") { reasons.push("UNSAFE_TARGET"); return fin("deny", "Guard flagged the target as unsafe (block).", false, verdict); }
-  if (verdict.decision === "review" && p.blockOnReview && !allowed) reasons.push("TARGET_REVIEW");
 
-  if (action.kind === "tx") {
-    if (unlimited && p.denyUnlimitedApprovals) { reasons.push("UNLIMITED_APPROVAL"); return fin("deny", "Unlimited token approval is denied by policy.", false, verdict); }
-    if (isApproval && approvals(s, HOUR) >= p.maxApprovalsPerHour) { reasons.push("APPROVAL_RATE"); return fin("hold", `Approval rate cap reached (${p.maxApprovalsPerHour}/hour).`, false, verdict); }
+  const outcome = decidePolicy(p, {
+    action, verdict, isApproval, unlimited, allowlisted,
+    callsMin: s.calls.length,
+    hourSpent: spent(s, HOUR), daySpent: spent(s, DAY), approvalsHour: approvals(s, HOUR),
+    seen: s.seen.has(action.to.toLowerCase()), medianSpend: median(s),
+  });
+
+  if (outcome.commit) {
+    s.spends.push({ ts: Date.now(), amountUsd: amount, counterparty: action.to.toLowerCase(), isApproval });
+    s.seen.add(action.to.toLowerCase());
   }
-
-  if (amount > p.maxPerCallUsd) { reasons.push("OVER_PER_CALL"); return fin("deny", `Amount $${amount} exceeds per-call cap $${p.maxPerCallUsd}.`, false, verdict); }
-  if (spent(s, HOUR) + amount > p.maxPerHourUsd) { reasons.push("OVER_HOURLY"); return fin("deny", `Would exceed hourly cap $${p.maxPerHourUsd}.`, false, verdict); }
-  if (spent(s, DAY) + amount > p.maxPerDayUsd) { reasons.push("OVER_DAILY"); return fin("deny", `Would exceed daily cap $${p.maxPerDayUsd}.`, false, verdict); }
-
-  if (!allowed && p.holdOnNewCounterparty && !s.seen.has(action.to.toLowerCase())) reasons.push("NEW_COUNTERPARTY");
-  if (!allowed && amount > 0) { const m = median(s); if (m !== undefined && amount > m * p.anomalyMultiplier) reasons.push("ANOMALY_SPIKE"); }
-
-  const holds = ["TARGET_REVIEW", "NEW_COUNTERPARTY", "ANOMALY_SPIKE", "APPROVAL_RATE"];
-  if (reasons.some((r) => holds.includes(r))) return fin("hold", "Needs approval: " + reasons.join(", "), false, verdict);
-
-  reasons.push(allowed ? "ALLOWLISTED" : "WITHIN_POLICY");
-  s.spends.push({ ts: Date.now(), amountUsd: amount, counterparty: action.to.toLowerCase(), isApproval });
-  s.seen.add(action.to.toLowerCase());
-  return fin("allow", allowed ? "Allowlisted, within policy." : "Within policy.", true, verdict);
+  reasons.push(...outcome.reasons);
+  return fin(outcome.decision, outcome.detail, outcome.commit, verdict);
 }
 
 // ── dashboard (multi-agent) ───────────────────────────────────────

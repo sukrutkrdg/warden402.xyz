@@ -22,6 +22,10 @@ const g = globalThis as unknown as { __wardenKV?: { counters: Map<string, number
 const mem = g.__wardenKV ?? (g.__wardenKV = { counters: new Map<string, number>(), recent: [] as string[], tokens: new Map<string, string>() });
 
 // ── Upstash REST pipeline ─────────────────────────────────────────
+export async function kvPipeline(commands: (string | number)[][]): Promise<unknown[]> {
+  return pipeline(commands);
+}
+
 async function pipeline(commands: (string | number)[][]): Promise<unknown[]> {
   const res = await fetch(`${URL}/pipeline`, {
     method: "POST",
