@@ -18,8 +18,8 @@ const K_RECENT = "wr:recent";
 const RECENT_CAP = 100;
 
 // ── in-memory fallback ────────────────────────────────────────────
-const g = globalThis as unknown as { __wardenKV?: { counters: Map<string, number>; recent: string[] } };
-const mem = g.__wardenKV ?? (g.__wardenKV = { counters: new Map<string, number>(), recent: [] as string[] });
+const g = globalThis as unknown as { __wardenKV?: { counters: Map<string, number>; recent: string[]; tokens: Map<string, string> } };
+const mem = g.__wardenKV ?? (g.__wardenKV = { counters: new Map<string, number>(), recent: [] as string[], tokens: new Map<string, string>() });
 
 // ── Upstash REST pipeline ─────────────────────────────────────────
 async function pipeline(commands: (string | number)[][]): Promise<unknown[]> {
@@ -95,4 +95,60 @@ export async function readStats(): Promise<TrackStats> {
 
   const recent = recentRaw.map((s) => { try { return JSON.parse(s); } catch { return null; } }).filter(Boolean);
   return { total, byDecision, recent, persistent: PERSISTENT };
+}
+
+// ── token verdicts + outcome tracking (the moat) ──────────────────
+const K_TOKENS = "wr:tokens";
+export type Outcome = "pending" | "rugged" | "survived";
+export interface TokenRec { address: string; decision: Decision; riskScore: number; liq: number; at: string; outcome: Outcome; curLiq?: number; checkedAt?: string }
+
+/** Record a token's FIRST verdict + liquidity snapshot (never overwritten). */
+export async function recordToken(address: string, decision: Decision, riskScore: number, liq: number): Promise<void> {
+  const addr = address.toLowerCase();
+  const val = JSON.stringify({ address: addr, decision, riskScore, liq, at: new Date().toISOString(), outcome: "pending" as Outcome });
+  if (PERSISTENT) {
+    try { await pipeline([["HSETNX", K_TOKENS, addr, val]]); return; } catch { /* fall through */ }
+  }
+  if (!mem.tokens.has(addr)) mem.tokens.set(addr, val);
+}
+
+export async function listTokens(): Promise<TokenRec[]> {
+  if (PERSISTENT) {
+    try {
+      const [flat] = await pipeline([["HGETALL", K_TOKENS]]);
+      const arr = (flat as string[]) ?? [];
+      const out: TokenRec[] = [];
+      for (let i = 1; i < arr.length; i += 2) { try { out.push(JSON.parse(arr[i]!)); } catch { /* skip */ } }
+      if (out.length) return out;
+    } catch { /* fall through */ }
+  }
+  return [...mem.tokens.values()].map((v) => JSON.parse(v));
+}
+
+export async function setOutcome(address: string, outcome: Outcome, curLiq: number): Promise<void> {
+  const addr = address.toLowerCase();
+  const list = await listTokens();
+  const rec = list.find((t) => t.address === addr);
+  if (!rec) return;
+  const val = JSON.stringify({ ...rec, outcome, curLiq, checkedAt: new Date().toISOString() });
+  if (PERSISTENT) {
+    try { await pipeline([["HSET", K_TOKENS, addr, val]]); return; } catch { /* fall through */ }
+  }
+  mem.tokens.set(addr, val);
+}
+
+export interface TokenStats { checked: number; rugsCaught: number; rugsMissed: number; hitRatePct: number | null }
+export async function tokenStats(): Promise<TokenStats> {
+  const list = await listTokens();
+  let rugsCaught = 0, rugsMissed = 0, checked = 0;
+  for (const t of list) {
+    if (t.outcome === "pending") continue;
+    checked++;
+    if (t.outcome === "rugged") {
+      if (t.decision === "clear") rugsMissed++;
+      else rugsCaught++;
+    }
+  }
+  const denom = rugsCaught + rugsMissed;
+  return { checked, rugsCaught, rugsMissed, hitRatePct: denom > 0 ? Math.round((rugsCaught / denom) * 100) : null };
 }

@@ -1,4 +1,4 @@
-import { readStats } from "../lib/store";
+import { readStats, tokenStats } from "../lib/store";
 
 export const dynamic = "force-dynamic";
 
@@ -24,10 +24,23 @@ function Row({ label, value, color, total }: { label: string; value: number; col
 const DECC: Record<string, string> = { block: "text-block", review: "text-review", clear: "text-clear" };
 
 export default async function TrackRecord() {
-  const s = await readStats();
+  const [s, ts] = await Promise.all([readStats(), tokenStats()]);
 
   return (
     <div className="space-y-8">
+      <div className="grid gap-4 sm:grid-cols-4">
+        <div className="rounded-xl border border-warden/30 bg-warden/5 p-5 sm:col-span-2">
+          <div className="text-xs uppercase tracking-widest text-slate-500">Provable hit-rate</div>
+          <div className="mt-1 text-4xl font-bold text-warden">{ts.hitRatePct === null ? "—" : `${ts.hitRatePct}%`}</div>
+          <div className="mt-1 text-xs text-slate-500">
+            {ts.hitRatePct === null
+              ? "Fills in as the re-checker verifies outcomes over time."
+              : "of tokens we flagged block/review that later actually rugged."}
+          </div>
+        </div>
+        <Stat label="rugs caught" value={ts.rugsCaught} accent="text-clear" />
+        <Stat label="rugs missed" value={ts.rugsMissed} accent={ts.rugsMissed > 0 ? "text-block" : "text-white"} />
+      </div>
       <div className="space-y-2">
         <h1 className="text-3xl font-bold text-white">Track Record</h1>
         <p className="max-w-2xl text-sm text-slate-400">

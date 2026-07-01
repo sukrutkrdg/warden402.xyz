@@ -77,12 +77,28 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/pricing" className="hover:text-white">Pricing</Link>
               <Link href="/track-record" className="hover:text-white">Track Record</Link>
               <a href="https://github.com/sukrutkrdg/warden402.xyz" className="hover:text-white" target="_blank" rel="noreferrer">GitHub</a>
+              <a href="https://x.com/sukrutkrdg" target="_blank" rel="noreferrer" aria-label="X (Twitter)"
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-edge bg-panel text-white transition hover:border-warden hover:text-warden">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true">
+                  <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                </svg>
+              </a>
             </nav>
           </div>
         </header>
         <main className="mx-auto max-w-5xl px-5 py-10">{children}</main>
         <footer className="border-t border-edge/60 py-8 text-center text-xs text-slate-500">
-          Warden · pre-execution security layer for the agent economy on Base
+          <div className="flex items-center justify-center gap-5">
+            <a href="https://x.com/sukrutkrdg" target="_blank" rel="noreferrer" className="flex items-center gap-1.5 hover:text-warden">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true">
+                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+              </svg>
+              @sukrutkrdg
+            </a>
+            <a href="mailto:sukrutkrdg@gmail.com" className="hover:text-warden">sukrutkrdg@gmail.com</a>
+            <a href="https://github.com/sukrutkrdg/warden402.xyz" target="_blank" rel="noreferrer" className="hover:text-warden">GitHub</a>
+          </div>
+          <div className="mt-3">Warden · pre-execution security layer for the agent economy on Base</div>
         </footer>
       </body>
     </html>
