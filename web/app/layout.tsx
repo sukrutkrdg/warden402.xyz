@@ -63,6 +63,22 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className="min-h-screen font-mono antialiased">
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@type": "SoftwareApplication",
+              name: "Warden",
+              applicationCategory: "SecurityApplication",
+              operatingSystem: "Web, API, MCP",
+              description: "Pre-execution security & trust layer for agents transacting on Base. block / review / clear before your agent signs.",
+              url: SITE_URL,
+              offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+              author: { "@type": "Person", name: "sukrutkrdg", url: "https://x.com/sukrutkrdg" },
+            }),
+          }}
+        />
         <FarcasterReady />
         <header className="border-b border-edge/60">
           <div className="mx-auto flex max-w-5xl items-center justify-between px-5 py-4">
