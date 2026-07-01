@@ -8,9 +8,14 @@ export const metadata = {
 export default function DashboardPage() {
   return (
     <div className="space-y-8">
+      <div className="rounded-lg border border-review/40 bg-review/10 px-4 py-3 text-sm text-review">
+        <span className="font-semibold">Preview with sample data.</span>{" "}
+        <span className="text-slate-300">These agents and numbers are illustrative — not real funds or transactions. It shows what your fleet dashboard looks like. Real dashboards are private, per-customer, and backed by live data.</span>
+      </div>
+
       <section className="space-y-3">
         <div className="inline-flex items-center gap-2 rounded-full border border-edge bg-panel px-3 py-1 text-xs text-slate-400">
-          <span className="h-1.5 w-1.5 rounded-full bg-warden" /> fleet dashboard · sample data
+          <span className="h-1.5 w-1.5 rounded-full bg-warden" /> fleet dashboard · preview
         </div>
         <h1 className="text-3xl font-bold text-white sm:text-4xl">Your agent fleet, under control</h1>
         <p className="max-w-2xl text-slate-400">
