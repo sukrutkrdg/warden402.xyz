@@ -10,6 +10,9 @@ const nextConfig = {
     return [
       // Farcaster / Base App Mini App manifest at the well-known path.
       { source: "/.well-known/farcaster.json", destination: "/api/farcaster-manifest" },
+      // Agent / AI discovery.
+      { source: "/llms.txt", destination: "/api/llms" },
+      { source: "/.well-known/mcp.json", destination: "/api/well-known-mcp" },
     ];
   },
 };
