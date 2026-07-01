@@ -16,11 +16,22 @@ export function AdminPanel() {
   useEffect(() => { const s = localStorage.getItem("warden_admin"); if (s) { setToken(s); setInput(s); } }, []);
   useEffect(() => { if (token) load(); }, [token]);
 
+  const [eas, setEas] = useState<any>(null);
+  const [attestTarget, setAttestTarget] = useState("");
+  const [easMsg, setEasMsg] = useState("");
+
   async function load() {
     setError("");
     const r = await fetch(`/api/admin`, { headers: { "x-warden-admin": token } });
     if (r.status === 403) { setError("Invalid admin token."); setData(null); return; }
     setData(await r.json());
+    setEas(await fetch(`/api/attest`, { headers: { "x-warden-admin": token } }).then((x) => x.json()).catch(() => null));
+  }
+  async function easOp(payload: object, label: string) {
+    setEasMsg(label + "…");
+    const r = await fetch("/api/attest", { method: "POST", headers: { "content-type": "application/json", "x-warden-admin": token }, body: JSON.stringify(payload) }).then((x) => x.json()).catch((e) => ({ error: String(e) }));
+    setEasMsg(r.error ? `error: ${r.detail ?? r.error}` : (r.easscan ? `sent: ${r.easscan}` : "done"));
+    load();
   }
   async function act(payload: object, label: string) {
     setBusy(label);
@@ -56,6 +67,26 @@ export function AdminPanel() {
         <button onClick={() => act({ op: "recheck" }, "recheck")} disabled={!!busy} className="rounded-lg border border-edge bg-ink px-3 py-2 text-xs hover:border-warden disabled:opacity-50">{busy === "recheck" ? "running…" : "Run re-checker"}</button>
         <CompButton onCreate={(agentId, plan, days) => act({ op: "comp", agentId, plan, days }, "comp")} />
       </div>
+
+      {eas && (
+        <div className="rounded-xl border border-edge bg-panel/60 p-5">
+          <h3 className="mb-3 text-sm uppercase tracking-widest text-slate-500">On-chain (Base EAS)</h3>
+          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
+            <span>attest: <span className={eas.enabled ? "text-clear" : "text-block"}>{eas.enabled ? "enabled" : "disabled (set ATTESTER_PRIVATE_KEY)"}</span></span>
+            <span>schema: <span className={eas.schemaRegistered ? "text-clear" : "text-review"}>{eas.schemaRegistered ? "registered" : "not registered"}</span></span>
+            <span>builder code: <span className="text-warden">{eas.builderCode}</span></span>
+            {eas.attester && <span className="font-mono text-slate-500">{eas.attester.slice(0, 10)}…</span>}
+          </div>
+          {eas.enabled && (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {!eas.schemaRegistered && <button onClick={() => easOp({ op: "register" }, "registering schema")} className="rounded-lg border border-warden/40 bg-warden/10 px-3 py-2 text-xs text-warden">Register schema</button>}
+              <input value={attestTarget} onChange={(e) => setAttestTarget(e.target.value)} placeholder="0x token to attest" className="w-56 rounded border border-edge bg-ink px-2 py-1.5 font-mono text-xs outline-none" />
+              <button onClick={() => easOp({ op: "attest", target: attestTarget, decision: "block", riskScore: 80, reasons: ["MANUAL"] }, "attesting")} className="rounded-lg border border-edge bg-ink px-3 py-2 text-xs hover:border-warden">Attest on Base</button>
+              {easMsg && <span className="text-xs text-slate-500">{easMsg}</span>}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="rounded-xl border border-edge bg-panel/60 p-5">
         <h3 className="mb-3 text-sm uppercase tracking-widest text-slate-500">Agents & subscriptions</h3>

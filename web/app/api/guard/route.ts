@@ -38,6 +38,10 @@ export async function GET(req: NextRequest) {
       const liq = Number((liqSig?.evidence as { totalLiq?: number } | undefined)?.totalLiq ?? 0);
       void recordToken(address, verdict.decision, verdict.riskScore, liq);
     }
+    // On-chain: auto-attest block verdicts to Base EAS (gated, fire-and-forget).
+    if (process.env.AUTO_ATTEST === "true" && verdict.decision === "block") {
+      import("../../lib/eas").then((m) => m.attestVerdict({ target: address, decision: verdict.decision, riskScore: verdict.riskScore, reasons: verdict.reasons })).catch(() => {});
+    }
     return NextResponse.json(verdict);
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
