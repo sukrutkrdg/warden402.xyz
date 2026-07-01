@@ -28,8 +28,13 @@ export async function POST(req: NextRequest) {
     } catch { /* best effort */ }
   }
 
-  // 3) map amount → plan  (USDC ~1:1; ETH already normalized to USD by verify)
-  const usd = v.token === "USDC" ? Number(v.amount) : 0; // ETH USD value unknown here → treat as starter min
+  // 3) map amount → plan (USDC ~1:1; ETH → convert to USD via live price)
+  let usd = 0;
+  if (v.token === "USDC") usd = Number(v.amount);
+  else {
+    const p = await fetch(new URL("/api/eth-price", req.nextUrl.origin), { cache: "no-store" }).then((r) => r.json()).catch(() => null);
+    usd = p?.usd ? Number(v.amount) * Number(p.usd) : 0;
+  }
   const plan: "starter" | "team" = usd >= 150 ? "team" : "starter";
   const expiresAt = new Date(Date.now() + 30 * 86_400_000).toISOString();
   const agentId = `sub_${(v.from ?? "").slice(2, 10)}_${Math.random().toString(36).slice(2, 6)}`;
