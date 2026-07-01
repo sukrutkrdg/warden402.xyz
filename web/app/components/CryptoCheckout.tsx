@@ -10,6 +10,11 @@ export function CryptoCheckout({ planName, defaultAmountUsd }: { planName: strin
   const [status, setStatus] = useState<"idle" | "paying" | "success" | "error">("idle");
   const [txHash, setTxHash] = useState<string>("");
   const [error, setError] = useState<string>("");
+  const [hasWallet, setHasWallet] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    setHasWallet(typeof window !== "undefined" && Boolean((window as { ethereum?: unknown }).ethereum));
+  }, []);
 
   useEffect(() => {
     if (token === "ETH" && !ethPrice) {
@@ -25,7 +30,9 @@ export function CryptoCheckout({ planName, defaultAmountUsd }: { planName: strin
       const hash = await pay(token, amount, ethPrice);
       setTxHash(hash); setStatus("success");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e)); setStatus("error");
+      const msg = e instanceof Error ? e.message : (e as { message?: string })?.message ?? String(e);
+      setError(msg === "[object Object]" ? "Wallet request failed or was rejected." : msg);
+      setStatus("error");
     }
   }
 
@@ -69,10 +76,19 @@ export function CryptoCheckout({ planName, defaultAmountUsd }: { planName: strin
         <div className="mt-1 break-all font-mono text-slate-300">{PAY_TO}</div>
       </div>
 
-      <button onClick={onPay} disabled={status === "paying"}
-        className="mt-5 w-full rounded-lg bg-warden px-4 py-3 text-sm font-semibold text-ink transition hover:brightness-110 disabled:opacity-50">
-        {status === "paying" ? "Confirm in your wallet…" : `Pay ${token} on Base`}
-      </button>
+      {hasWallet === false ? (
+        <div className="mt-5 rounded-lg border border-review/30 bg-review/5 p-3 text-sm text-review">
+          No crypto wallet detected in this browser. Install{" "}
+          <a href="https://www.coinbase.com/wallet/downloads" target="_blank" rel="noreferrer" className="underline">Coinbase Wallet</a>{" "}
+          or <a href="https://metamask.io/download/" target="_blank" rel="noreferrer" className="underline">MetaMask</a>, then reload.
+          <p className="mt-1 text-xs text-slate-500">On mobile, open warden402.xyz inside your wallet app&apos;s browser.</p>
+        </div>
+      ) : (
+        <button onClick={onPay} disabled={status === "paying"}
+          className="mt-5 w-full rounded-lg bg-warden px-4 py-3 text-sm font-semibold text-ink transition hover:brightness-110 disabled:opacity-50">
+          {status === "paying" ? "Confirm in your wallet…" : `Pay ${token} on Base`}
+        </button>
+      )}
 
       {status === "success" && (
         <div className="mt-4 rounded-lg border border-clear/30 bg-clear/5 p-3 text-sm text-clear">
