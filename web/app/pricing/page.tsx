@@ -11,47 +11,65 @@ const TIERS = [
     name: "Free",
     price: "$0",
     period: "forever",
-    tagline: "For every agent and solo builder",
+    tagline: "For solo builders & every agent",
+    limits: "1 agent · guard only",
     cta: { label: "Install the MCP", href: "/" },
     highlight: false,
     features: [
       "guard_token · guard_tx · guard_address",
       "MCP server (npx warden402-mcp) — no keys",
       "SDK + LangChain tools",
-      "Unlimited via the public API*",
+      "1 firewall agent",
       "Community support",
+    ],
+  },
+  {
+    name: "Starter",
+    price: "$49",
+    period: "/ month",
+    tagline: "For small fleets getting started",
+    limits: "2 agents · up to 20k checks / mo",
+    cta: { label: "Pay with crypto", href: "#checkout" },
+    highlight: false,
+    features: [
+      "Everything in Free",
+      "2 firewall agents",
+      "Spend caps, allow/deny, drain protection",
+      "Kill switch + audit log",
+      "Email support",
     ],
   },
   {
     name: "Team",
     price: "$299",
     period: "/ month",
-    tagline: "For teams running a fleet of agents",
+    tagline: "For teams running a fleet",
+    limits: "10 agents · up to 100k checks / mo",
     cta: { label: "Pay with crypto", href: "#checkout" },
     highlight: true,
     features: [
-      "Everything in Free",
-      "Firewall: unlimited agents + policies",
-      "Spend caps, allow/deny, rate limits",
-      "Drain protection + anomaly detection",
-      "Kill switch + full audit log",
-      "Dashboard + webhook approvals",
+      "Everything in Starter",
+      "10 firewall agents",
+      "Anomaly detection + webhook approvals",
+      "Fleet dashboard",
+      "Priority support",
     ],
   },
   {
     name: "Enterprise",
     price: "Custom",
     period: "",
-    tagline: "For funds, wallets and platforms",
-    cta: { label: "Contact us", href: "mailto:hello@warden402.xyz" },
+    tagline: "For funds, wallets & platforms",
+    limits: "unlimited · usage / bps pricing",
+    cta: { label: "Contact us", href: "mailto:sukrutkrdg@gmail.com" },
     highlight: false,
     features: [
       "Everything in Team",
+      "Unlimited agents + checks",
       "Edge deploy (Cloudflare Worker)",
       "SSO + on-prem / VPC option",
       "OFAC compliance + audit export",
-      "Basis-point pricing on routed value",
-      "SLA + priority support",
+      "Basis-point pricing on routed value + SLA",
     ],
   },
 ];
@@ -67,7 +85,7 @@ export default function Pricing() {
         </p>
       </section>
 
-      <section className="grid gap-5 lg:grid-cols-3">
+      <section className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
         {TIERS.map((t) => (
           <div
             key={t.name}
@@ -82,7 +100,8 @@ export default function Pricing() {
               <span className="text-sm text-slate-500">{t.period}</span>
             </div>
             <p className="mt-1 text-sm text-slate-400">{t.tagline}</p>
-            <ul className="mt-5 flex-1 space-y-2 text-sm">
+            <div className="mt-3 rounded-md border border-edge bg-ink/50 px-2.5 py-1.5 text-[11px] text-slate-400">{t.limits}</div>
+            <ul className="mt-4 flex-1 space-y-2 text-sm">
               {t.features.map((f) => (
                 <li key={f} className="flex gap-2 text-slate-300">
                   <span className="text-warden">✓</span>
@@ -100,8 +119,9 @@ export default function Pricing() {
         ))}
       </section>
 
-      <section id="checkout" className="mx-auto max-w-md scroll-mt-20">
-        <CryptoCheckout planName="Team — monthly" defaultAmountUsd={299} />
+      <section id="checkout" className="mx-auto max-w-md scroll-mt-20 space-y-2">
+        <p className="text-center text-xs text-slate-500">Set the amount for your plan — <span className="text-slate-300">$49 Starter</span> or <span className="text-slate-300">$299 Team</span> (monthly).</p>
+        <CryptoCheckout planName="monthly plan" defaultAmountUsd={49} />
       </section>
 
       <section className="rounded-xl border border-edge bg-panel/60 p-6 text-sm text-slate-400">
