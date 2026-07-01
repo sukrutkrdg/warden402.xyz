@@ -60,8 +60,17 @@ const TIMEOUT_MS = Number(process.env.BAZAAR_TIMEOUT_MS ?? 4000);
 
 interface BazaarResult { ok: boolean; data?: unknown; status?: number; error?: string }
 
+// In-memory TTL cache — token risk changes slowly, so caching repeat calls
+// slashes upstream cost (margin protection). Only successful reads are cached.
+const CACHE_TTL_MS = Number(process.env.BAZAAR_CACHE_TTL_MS ?? 300_000); // 5 min
+const gc = globalThis as unknown as { __wardenBazaarCache?: Map<string, { at: number; val: BazaarResult }> };
+const cache = gc.__wardenBazaarCache ?? (gc.__wardenBazaarCache = new Map());
+
 async function bazaarGet(path: string, params: Record<string, string>): Promise<BazaarResult> {
   const url = `${BASE_URL}${path}?${new URLSearchParams(params).toString()}`;
+  const hit = cache.get(url);
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.val;
+
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
@@ -72,7 +81,9 @@ async function bazaarGet(path: string, params: Record<string, string>): Promise<
     });
     if (res.status === 402) return { ok: false, status: 402, error: "Bazaar 402 — internal-auth yok" };
     if (!res.ok) return { ok: false, status: res.status, error: `HTTP ${res.status}` };
-    return { ok: true, status: res.status, data: await res.json() };
+    const val: BazaarResult = { ok: true, status: res.status, data: await res.json() };
+    cache.set(url, { at: Date.now(), val }); // cache successes only
+    return val;
   } catch (err) {
     const aborted = err instanceof Error && err.name === "AbortError";
     return { ok: false, error: aborted ? `timeout>${TIMEOUT_MS}ms` : String(err) };
