@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { guardToken, guardAddress, guardTx } from "../../lib/guard";
 import { clientIp, rateLimit } from "../../lib/rateLimit";
+import { recordVerdict } from "../../lib/store";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,7 @@ export async function GET(req: NextRequest) {
   }
   try {
     const verdict = type === "address" ? await guardAddress(address, chainId) : await guardToken(address, chainId);
+    void recordVerdict({ decision: verdict.decision, riskScore: verdict.riskScore, target: address });
     return NextResponse.json(verdict);
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });

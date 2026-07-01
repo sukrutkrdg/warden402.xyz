@@ -1,14 +1,9 @@
 import { NextResponse } from "next/server";
+import { readStats } from "../../lib/store";
 
 export const dynamic = "force-dynamic";
 
-const API = process.env.WARDEN_API_URL ?? "http://localhost:8787";
-
+// GET /api/track-record → live trust stats from the ledger (persistent if KV set).
 export async function GET() {
-  try {
-    const r = await fetch(`${API}/track-record`, { cache: "no-store" });
-    return NextResponse.json(await r.json(), { status: r.status });
-  } catch (e) {
-    return NextResponse.json({ error: "api_unreachable", detail: String(e) }, { status: 502 });
-  }
+  return NextResponse.json(await readStats());
 }

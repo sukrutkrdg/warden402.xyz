@@ -19,7 +19,7 @@ const RECENT_CAP = 100;
 
 // ── in-memory fallback ────────────────────────────────────────────
 const g = globalThis as unknown as { __wardenKV?: { counters: Map<string, number>; recent: string[] } };
-const mem = g.__wardenKV ?? (g.__wardenKV = { counters: new Map(), recent: [] });
+const mem = g.__wardenKV ?? (g.__wardenKV = { counters: new Map<string, number>(), recent: [] as string[] });
 
 // ── Upstash REST pipeline ─────────────────────────────────────────
 async function pipeline(commands: (string | number)[][]): Promise<unknown[]> {
