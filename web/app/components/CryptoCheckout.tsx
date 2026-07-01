@@ -11,6 +11,7 @@ export function CryptoCheckout({ planName, defaultAmountUsd }: { planName: strin
   const [txHash, setTxHash] = useState<string>("");
   const [error, setError] = useState<string>("");
   const [hasWallet, setHasWallet] = useState<boolean | null>(null);
+  const [verified, setVerified] = useState<{ token: string; amount: number } | null>(null);
 
   useEffect(() => {
     setHasWallet(typeof window !== "undefined" && Boolean((window as { ethereum?: unknown }).ethereum));
@@ -25,10 +26,16 @@ export function CryptoCheckout({ planName, defaultAmountUsd }: { planName: strin
   const ethAmount = token === "ETH" && ethPrice ? (amount / ethPrice).toFixed(6) : null;
 
   async function onPay() {
-    setStatus("paying"); setError(""); setTxHash("");
+    setStatus("paying"); setError(""); setTxHash(""); setVerified(null);
     try {
       const hash = await pay(token, amount, ethPrice);
       setTxHash(hash); setStatus("success");
+      // Confirm on-chain (a few tries while it settles).
+      for (let i = 0; i < 8; i++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const v = await fetch(`/api/verify-payment?hash=${hash}`).then((r) => r.json()).catch(() => null);
+        if (v?.verified) { setVerified({ token: v.token, amount: v.amount }); break; }
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : (e as { message?: string })?.message ?? String(e);
       setError(msg === "[object Object]" ? "Wallet request failed or was rejected." : msg);
@@ -92,9 +99,13 @@ export function CryptoCheckout({ planName, defaultAmountUsd }: { planName: strin
 
       {status === "success" && (
         <div className="mt-4 rounded-lg border border-clear/30 bg-clear/5 p-3 text-sm text-clear">
-          Payment sent ✓{" "}
+          {verified
+            ? `On-chain confirmed ✓ ${verified.amount} ${verified.token} received.`
+            : "Payment sent ✓ confirming on-chain…"}{" "}
           <a href={explorerTx(txHash)} target="_blank" rel="noreferrer" className="underline">View on BaseScan</a>
-          <p className="mt-1 text-xs text-slate-400">Email the tx hash to hello@warden402.xyz to activate your plan.</p>
+          <p className="mt-1 text-xs text-slate-400">
+            {verified ? "Your plan is being activated — we'll reach out at your contact email." : "This can take a few seconds."}
+          </p>
         </div>
       )}
       {status === "error" && <div className="mt-4 rounded-lg border border-block/30 bg-block/5 p-3 text-sm text-block">{error}</div>}
