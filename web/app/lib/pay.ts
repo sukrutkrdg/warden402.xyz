@@ -80,12 +80,29 @@ export function toUnits(token: PayToken, amountUsd: number, ethPriceUsd?: number
   return BigInt(Math.round(eth * 1e9)) * 1_000_000_000n;
 }
 
+/** Read the payer's balance (wei for ETH, 6-dec units for USDC). */
+async function balanceOf(token: PayToken, from: string): Promise<bigint> {
+  const eth = provider();
+  if (token === "ETH") return BigInt((await eth.request({ method: "eth_getBalance", params: [from, "latest"] })) as string);
+  const data = "0x70a08231" + from.replace(/^0x/, "").toLowerCase().padStart(64, "0");
+  const res = (await eth.request({ method: "eth_call", params: [{ to: USDC_BASE, data }, "latest"] })) as string;
+  return res && res !== "0x" ? BigInt(res) : 0n;
+}
+
 /** Send the payment. Returns the tx hash. */
 export async function pay(token: PayToken, amountUsd: number, ethPriceUsd?: number): Promise<string> {
   const eth = provider();
   const from = await connect();
   await ensureBase();
   const units = toUnits(token, amountUsd, ethPriceUsd);
+
+  // Pre-flight balance check so we never submit a doomed transaction.
+  const bal = await balanceOf(token, from);
+  const needed = token === "ETH" ? units + units / 20n : units; // small ETH gas buffer
+  if (bal < needed) {
+    const have = token === "ETH" ? Number(bal) / 1e18 : Number(bal) / 1e6;
+    throw new Error(`Insufficient ${token} balance on Base — you have ~${have.toFixed(token === "ETH" ? 5 : 2)} ${token}.`);
+  }
 
   const tx =
     token === "USDC"

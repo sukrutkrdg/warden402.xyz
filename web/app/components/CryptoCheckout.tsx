@@ -14,6 +14,7 @@ export function CryptoCheckout({ planName, defaultAmountUsd }: { planName: strin
   const [account, setAccount] = useState<string>("");
   const [connecting, setConnecting] = useState(false);
   const [verified, setVerified] = useState<{ token: string; amount: number } | null>(null);
+  const [unconfirmed, setUnconfirmed] = useState(false);
 
   async function onConnect() {
     setConnecting(true); setError("");
@@ -35,16 +36,19 @@ export function CryptoCheckout({ planName, defaultAmountUsd }: { planName: strin
   const ethAmount = token === "ETH" && ethPrice ? (amount / ethPrice).toFixed(6) : null;
 
   async function onPay() {
-    setStatus("paying"); setError(""); setTxHash(""); setVerified(null);
+    setStatus("paying"); setError(""); setTxHash(""); setVerified(null); setUnconfirmed(false);
     try {
       const hash = await pay(token, amount, ethPrice);
       setTxHash(hash); setStatus("success");
-      // Confirm on-chain (a few tries while it settles).
-      for (let i = 0; i < 8; i++) {
+      // Confirm on-chain — only a settled transfer to Warden counts as paid.
+      let ok = false;
+      for (let i = 0; i < 12; i++) {
         await new Promise((r) => setTimeout(r, 3000));
         const v = await fetch(`/api/verify-payment?hash=${hash}`).then((r) => r.json()).catch(() => null);
-        if (v?.verified) { setVerified({ token: v.token, amount: v.amount }); break; }
+        if (v?.verified) { setVerified({ token: v.token, amount: v.amount }); ok = true; break; }
+        if (v?.error && v.error !== "not_found" && v.error !== "not_confirmed") break; // definitive failure
       }
+      if (!ok) setUnconfirmed(true);
     } catch (e) {
       const msg = e instanceof Error ? e.message : (e as { message?: string })?.message ?? String(e);
       setError(msg === "[object Object]" ? "Wallet request failed or was rejected." : msg);
@@ -115,14 +119,14 @@ export function CryptoCheckout({ planName, defaultAmountUsd }: { planName: strin
       )}
 
       {status === "success" && (
-        <div className="mt-4 rounded-lg border border-clear/30 bg-clear/5 p-3 text-sm text-clear">
+        <div className={`mt-4 rounded-lg border p-3 text-sm ${verified ? "border-clear/30 bg-clear/5 text-clear" : unconfirmed ? "border-block/30 bg-block/5 text-block" : "border-review/30 bg-review/5 text-review"}`}>
           {verified
             ? `On-chain confirmed ✓ ${verified.amount} ${verified.token} received.`
-            : "Payment sent ✓ confirming on-chain…"}{" "}
+            : unconfirmed
+            ? "Not confirmed. The transaction may have failed or reverted (e.g. insufficient balance) — no plan was activated."
+            : "Transaction submitted — confirming on-chain…"}{" "}
           <a href={explorerTx(txHash)} target="_blank" rel="noreferrer" className="underline">View on BaseScan</a>
-          <p className="mt-1 text-xs text-slate-400">
-            {verified ? "Your plan is being activated — we'll reach out at your contact email." : "This can take a few seconds."}
-          </p>
+          {verified && <p className="mt-1 text-xs text-slate-400">Your plan is being activated — we&apos;ll reach out at your contact email.</p>}
         </div>
       )}
       {status === "error" && <div className="mt-4 rounded-lg border border-block/30 bg-block/5 p-3 text-sm text-block">{error}</div>}
