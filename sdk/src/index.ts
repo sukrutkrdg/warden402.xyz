@@ -70,6 +70,13 @@ export class WardenBlockedError extends Error {
   }
 }
 
+export class FirewallBlockedError extends Error {
+  constructor(public result: FirewallResult) {
+    super(`Firewall ${result.decision.toUpperCase()}: ${result.detail} [${result.reasons.join(", ")}]`);
+    this.name = "FirewallBlockedError";
+  }
+}
+
 export class Warden {
   private baseUrl: string;
   private blockOn: Decision[];
@@ -137,6 +144,21 @@ export class Warden {
     } finally {
       clearTimeout(t);
     }
+  }
+
+  /**
+   * Middleware: run an action through the Firewall, then execute `send` only if
+   * the decision is "allow". Throws FirewallBlockedError on hold/deny.
+   *   await warden.protect({ kind:"tx", to, from, calldata }, key, () => wallet.send(tx));
+   */
+  async protect<T>(
+    action: { kind: "x402_payment" | "tx"; to: string; amountUsd?: number; from?: string; calldata?: string; value?: string; chainId?: number },
+    agentKey: string,
+    send: () => Promise<T>,
+  ): Promise<T> {
+    const r = await this.firewall(action, agentKey);
+    if (r.decision !== "allow") throw new FirewallBlockedError(r);
+    return send();
   }
 
   /** verdict blockOn listesindeyse WardenBlockedError fırlatır, değilse verdict'i döner. */

@@ -66,10 +66,24 @@ npm run smoke                # offline decision tests
 npm run dev                  # http://localhost:8787
 ```
 
+## Production topology
+
+- **`web/` is the production API + site.** Deployed as a single Vercel project
+  (Root Directory = `web`). It runs the guard/firewall **in-process**, so the
+  endpoints agents actually call (`/api/guard`, `/api/firewall`) are live here.
+  Hot path is **edge-friendly**: KV store (no `fs`) + per-IP rate limiting.
+  Persistence turns on when `KV_REST_API_URL` / `KV_REST_API_TOKEN` are set.
+- **`src/` (Hono API) is an optional Node host** — for teams that want a
+  persistent-disk ledger or the x402 payment layer. Not required; not deployed by
+  default. The `src/` modules are the canonical logic; a **drift-guard test**
+  (`tests/drift.test.ts`) proves the web copy stays identical.
+- **Drift is impossible to ship silently:** `npm test` fails if the two diverge.
+
 ## Deploy
 
 See **[DEPLOY.md](./DEPLOY.md)**. TL;DR: new Vercel project, **Root Directory = `web`**,
-set `BAZAAR_INTERNAL_SECRET`, deploy. Done.
+set `BAZAAR_INTERNAL_SECRET` (+ optional `KV_REST_API_URL`/`KV_REST_API_TOKEN` for
+persistent track-record), deploy. Done.
 
 ## Bazaar internal-auth
 

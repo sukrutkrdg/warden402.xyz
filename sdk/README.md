@@ -30,6 +30,27 @@ new Warden({
 });
 ```
 
+## Middleware — guard before you sign
+
+Wrap any send/sign so it only runs when the Firewall says `allow`:
+
+```ts
+import { Warden, FirewallBlockedError } from "@warden402/sdk";
+const warden = new Warden({ baseUrl: "https://your-api" });
+
+try {
+  const receipt = await warden.protect(
+    { kind: "tx", to, from, calldata },
+    "agent-key",
+    () => wallet.sendTransaction(tx),   // runs only on ALLOW
+  );
+} catch (e) {
+  if (e instanceof FirewallBlockedError) {
+    // e.result.decision is "hold" | "deny", e.result.reasons explains why
+  }
+}
+```
+
 ## LangChain
 
 ```ts
