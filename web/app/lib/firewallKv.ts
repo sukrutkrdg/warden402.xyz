@@ -276,7 +276,7 @@ export async function listHolds(id: string, onlyPending = true): Promise<HoldRec
   if (PERSISTENT) {
     try { const [flat] = await kvPipeline([["HGETALL", `fw:holds:${id}`]]); const a = (flat as string[]) ?? []; for (let i = 1; i < a.length; i += 2) { try { out.push(JSON.parse(a[i]!)); } catch { /* skip */ } } } catch { /* fall */ }
   }
-  if (!out.length) out = Object.values(mem.holds.get(`fw:holds:${id}`) ?? {}).map((s: string) => JSON.parse(s));
+  if (!out.length) { const m = mem.holds.get(`fw:holds:${id}`); if (m) out = Object.values(m).map((s) => JSON.parse(s as string)); }
   out.sort((x, y) => (x.createdAt < y.createdAt ? 1 : -1));
   return onlyPending ? out.filter((h) => h.status === "pending") : out;
 }
