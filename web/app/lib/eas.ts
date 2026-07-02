@@ -32,7 +32,13 @@ const ATTEST_ABI = [{ type: "function", name: "attest", stateMutability: "payabl
 
 function account() {
   if (!KEY) throw new Error("ATTESTER_PRIVATE_KEY not set — on-chain attestations disabled.");
-  return privateKeyToAccount((KEY.startsWith("0x") ? KEY : `0x${KEY}`) as `0x${string}`);
+  // Sanitize common paste issues: whitespace, surrounding quotes.
+  let k = KEY.trim().replace(/^["']|["']$/g, "").replace(/\s+/g, "");
+  if (!k.startsWith("0x")) k = `0x${k}`;
+  if (!/^0x[0-9a-fA-F]{64}$/.test(k)) {
+    throw new Error("ATTESTER_PRIVATE_KEY must be a 64-hex-character private key (0x optional) — NOT a seed phrase / mnemonic.");
+  }
+  return privateKeyToAccount(k as `0x${string}`);
 }
 function wallet() { return createWalletClient({ account: account(), chain: base, transport: http(RPC) }); }
 const publicClient = createPublicClient({ chain: base, transport: http(RPC) });
