@@ -35,12 +35,11 @@ async function currentLiquidity(address: string): Promise<number | undefined> {
  * Protected by CRON_SECRET (Authorization: Bearer or ?secret=). Vercel Cron friendly.
  */
 export async function GET(req: NextRequest) {
-  if (CRON_SECRET) {
-    const auth = req.headers.get("authorization") ?? "";
-    const q = req.nextUrl.searchParams.get("secret") ?? "";
-    if (auth !== `Bearer ${CRON_SECRET}` && q !== CRON_SECRET) {
-      return NextResponse.json({ error: "forbidden" }, { status: 403 });
-    }
+  // Fail closed: require CRON_SECRET to be configured AND matched.
+  const auth = req.headers.get("authorization") ?? "";
+  const q = req.nextUrl.searchParams.get("secret") ?? "";
+  if (!CRON_SECRET || (auth !== `Bearer ${CRON_SECRET}` && q !== CRON_SECRET)) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
   const minAgeMs = Number(process.env.RECHECK_MIN_AGE_MS ?? 0); // prod: e.g. 86400000 (24h)

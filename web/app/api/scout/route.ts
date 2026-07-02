@@ -36,12 +36,11 @@ async function fetchAddresses(ep: string): Promise<string[]> {
  * Protected by CRON_SECRET. Pair with /api/recheck (daily) to mark outcomes.
  */
 export async function GET(req: NextRequest) {
-  if (CRON_SECRET) {
-    const auth = req.headers.get("authorization") ?? "";
-    const q = req.nextUrl.searchParams.get("secret") ?? "";
-    if (auth !== `Bearer ${CRON_SECRET}` && q !== CRON_SECRET) {
-      return NextResponse.json({ error: "forbidden" }, { status: 403 });
-    }
+  // Fail closed: require CRON_SECRET to be configured AND matched.
+  const auth = req.headers.get("authorization") ?? "";
+  const q = req.nextUrl.searchParams.get("secret") ?? "";
+  if (!CRON_SECRET || (auth !== `Bearer ${CRON_SECRET}` && q !== CRON_SECRET)) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
   const addrs = [...new Set([...(await fetchAddresses("new-tokens")), ...(await fetchAddresses("trending-tokens"))])].slice(0, 20);

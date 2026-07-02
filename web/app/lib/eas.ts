@@ -10,7 +10,7 @@
  *   BASE_BUILDER_CODE      default bc_mq7ey4g0 (attribution)
  *   BASE_RPC_URL           optional RPC override
  */
-import { createPublicClient, createWalletClient, encodeAbiParameters, encodeFunctionData, http, keccak256, encodePacked, stringToHex } from "viem";
+import { createPublicClient, createWalletClient, encodeAbiParameters, encodeFunctionData, http, keccak256, encodePacked, nonceManager, stringToHex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { base } from "viem/chains";
 
@@ -38,14 +38,23 @@ function account() {
   if (!/^0x[0-9a-fA-F]{64}$/.test(k)) {
     throw new Error("ATTESTER_PRIVATE_KEY must be a 64-hex-character private key (0x optional) — NOT a seed phrase / mnemonic.");
   }
-  return privateKeyToAccount(k as `0x${string}`);
+  // nonceManager serializes nonces → no collisions under concurrent auto-attest.
+  return privateKeyToAccount(k as `0x${string}`, { nonceManager });
 }
 function wallet() { return createWalletClient({ account: account(), chain: base, transport: http(RPC) }); }
 const publicClient = createPublicClient({ chain: base, transport: http(RPC) });
 
-/** Append the Builder Code to calldata so Base attributes the on-chain action. */
+/**
+ * Append the Builder Code as an ERC-8021 attribution suffix so Base actually
+ * credits the on-chain action. Suffix (read backwards from the end):
+ *   [1-byte length][ASCII code][1-byte schemaId=0x00][16-byte marker 0x8021…8021]
+ * (raw ASCII alone gets NO attribution — the marker/length framing is required.)
+ */
+const ERC8021_MARKER = "80218021802180218021802180218021"; // 16 bytes
 function withBuilderCode(data: `0x${string}`): `0x${string}` {
-  return (data + stringToHex(BUILDER_CODE).slice(2)) as `0x${string}`;
+  const ascii = stringToHex(BUILDER_CODE).slice(2);          // utf-8 hex of the code
+  const len = (BUILDER_CODE.length & 0xff).toString(16).padStart(2, "0");
+  return (data + len + ascii + "00" + ERC8021_MARKER) as `0x${string}`;
 }
 
 /** Deterministic EAS schema UID (so we know it without parsing logs). */
@@ -67,7 +76,7 @@ export async function attestVerdict(v: VerdictAttestation): Promise<{ txHash: st
   const schema = SCHEMA_UID ?? computeSchemaUID();
   const encoded = encodeAbiParameters(
     [{ type: "address" }, { type: "uint8" }, { type: "uint8" }, { type: "string" }],
-    [v.target as `0x${string}`, DECISION_CODE[v.decision] ?? 1, Math.min(255, v.riskScore), v.reasons.join(",")],
+    [v.target as `0x${string}`, DECISION_CODE[v.decision] ?? 1, Math.max(0, Math.min(255, Math.floor(v.riskScore || 0))), v.reasons.join(",")],
   );
   const data = withBuilderCode(encodeFunctionData({
     abi: ATTEST_ABI, functionName: "attest",

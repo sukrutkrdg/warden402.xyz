@@ -23,7 +23,13 @@ export function rateLimit(key: string, limit: number, windowMs: number): RateRes
 }
 
 export function clientIp(req: Request): string {
+  // Prefer Vercel's trusted client IP; the LEFT-most x-forwarded-for entry is
+  // attacker-controlled, so never trust it. Fall back to the right-most XFF hop.
+  const vercel = req.headers.get("x-vercel-forwarded-for");
+  if (vercel) return vercel.split(",")[0]!.trim();
+  const real = req.headers.get("x-real-ip");
+  if (real) return real.trim();
   const xff = req.headers.get("x-forwarded-for");
-  if (xff) return xff.split(",")[0]!.trim();
-  return req.headers.get("x-real-ip") || "unknown";
+  if (xff) { const parts = xff.split(",").map((s) => s.trim()).filter(Boolean); return parts[parts.length - 1] || "unknown"; }
+  return "unknown";
 }

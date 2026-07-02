@@ -115,10 +115,19 @@ async function num(cmd: (string | number)[], memKey: string): Promise<number> {
   return Number(mem.kv.get(memKey) ?? 0);
 }
 const monthEpoch = () => Math.floor(Date.now() / 2_592_000_000);
-async function incrMonthly(id: string): Promise<number> {
-  const k = `fw:checks:${id}:m:${monthEpoch()}`;
-  if (PERSISTENT) { try { const [v] = await kvPipeline([["INCR", k], ["EXPIRE", k, 2_764_800]]); return Number(v ?? 1); } catch { /* fall */ } }
-  const cur = Number(mem.kv.get(k) ?? 0) + 1; mem.kv.set(k, String(cur)); return cur;
+async function incrWindow(key: string, ttl: number): Promise<number> {
+  if (PERSISTENT) { try { const [v] = await kvPipeline([["INCR", key], ["EXPIRE", key, ttl]]); return Number(v ?? 1); } catch { /* fall */ } }
+  const cur = Number(mem.kv.get(key) ?? 0) + 1; mem.kv.set(key, String(cur)); return cur;
+}
+const incrMonthly = (id: string) => incrWindow(`fw:checks:${id}:m:${monthEpoch()}`, 2_764_800);
+async function recentSpends(id: string): Promise<number[]> {
+  if (PERSISTENT) { try { const [v] = await kvPipeline([["LRANGE", `fw:spendlist:${id}`, 0, 19]]); return ((v as string[]) ?? []).map(Number).filter((n: number) => n > 0); } catch { /* fall */ } }
+  return (mem.lists.get(`fw:spendlist:${id}`) ?? []).map(Number).filter((n: number) => n > 0);
+}
+function medianOf(arr: number[]): number | undefined {
+  if (arr.length < 3) return undefined;
+  const a = [...arr].sort((x, y) => x - y); const m = Math.floor(a.length / 2);
+  return a.length % 2 ? a[m]! : (a[m - 1]! + a[m]!) / 2;
 }
 export async function getUsage(record: AgentRecord) {
   const used = await num(["GET", `fw:checks:${record.agentId}:m:${monthEpoch()}`], `fw:checks:${record.agentId}:m:${monthEpoch()}`);
@@ -142,6 +151,7 @@ async function commit(id: string, addr: string, amount: number, isApproval: bool
         ["SADD", `fw:seen:${id}`, a],
       ];
       if (isApproval) { cmds.push(["INCR", `fw:appr:${id}:h:${h}`], ["EXPIRE", `fw:appr:${id}:h:${h}`, 3600]); }
+      if (amount > 0) { cmds.push(["LPUSH", `fw:spendlist:${id}`, amount], ["LTRIM", `fw:spendlist:${id}`, 0, 19]); }
       await kvPipeline(cmds);
       return;
     } catch { /* fall */ }
@@ -151,6 +161,7 @@ async function commit(id: string, addr: string, amount: number, isApproval: bool
   if (!mem.sets.has(`fw:seen:${id}`)) mem.sets.set(`fw:seen:${id}`, new Set());
   mem.sets.get(`fw:seen:${id}`)!.add(a);
   if (isApproval) bump(`fw:appr:${id}:h:${h}`, 1);
+  if (amount > 0) { const k = `fw:spendlist:${id}`; const l = mem.lists.get(k) ?? []; l.unshift(String(amount)); mem.lists.set(k, l.slice(0, 20)); }
 }
 
 async function audit(id: string, r: FirewallResult, action: FirewallAction) {
@@ -193,17 +204,21 @@ export async function checkKv(record: AgentRecord, action: FirewallAction): Prom
     verdict = await guardAddress(action.to);
   }
 
-  const [hourSpent, daySpent, approvalsHour] = await Promise.all([
+  const minEpoch = Math.floor(Date.now() / 60_000);
+  const [hourSpent, daySpent, approvalsHour, callsMin, recent, isSeen] = await Promise.all([
     num(["GET", `fw:spend:${id}:h:${h}`], `fw:spend:${id}:h:${h}`),
     num(["GET", `fw:spend:${id}:d:${d}`], `fw:spend:${id}:d:${d}`),
     num(["GET", `fw:appr:${id}:h:${h}`], `fw:appr:${id}:h:${h}`),
+    incrWindow(`fw:calls:${id}:m:${minEpoch}`, 65), // per-minute call counter (enforces maxCallsPerMinute)
+    recentSpends(id),
+    seen(id, action.to),
   ]);
 
   const outcome = decidePolicy(p, {
     action, verdict, isApproval, unlimited,
     allowlisted: p.allow.some((x) => x.toLowerCase() === action.to.toLowerCase()),
-    callsMin: 0, hourSpent, daySpent, approvalsHour,
-    seen: await seen(id, action.to), medianSpend: undefined,
+    callsMin, hourSpent, daySpent, approvalsHour,
+    seen: isSeen, medianSpend: medianOf(recent),
   });
 
   if (outcome.commit) await commit(id, action.to, amount, isApproval);

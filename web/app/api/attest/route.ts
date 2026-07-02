@@ -4,8 +4,13 @@ import { ATTEST_ENABLED, BUILDER_CODE, SCHEMA, SCHEMA_UID, attestVerdict, attest
 export const dynamic = "force-dynamic";
 
 const ADMIN = process.env.ADMIN_TOKEN;
+function safeEq(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let r = 0; for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return r === 0;
+}
 function authed(req: NextRequest) {
-  return Boolean(ADMIN) && (req.headers.get("x-warden-admin") === ADMIN || req.nextUrl.searchParams.get("token") === ADMIN);
+  return Boolean(ADMIN) && safeEq(req.headers.get("x-warden-admin") ?? "", ADMIN as string);
 }
 
 // GET /api/attest → on-chain attestation config/status (admin)

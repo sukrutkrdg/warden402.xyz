@@ -6,11 +6,14 @@ export const dynamic = "force-dynamic";
 
 const ADMIN = process.env.ADMIN_TOKEN;
 
+function safeEq(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let r = 0; for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return r === 0;
+}
 function authed(req: NextRequest): boolean {
-  if (!ADMIN) return false; // locked until configured
-  const h = req.headers.get("x-warden-admin") ?? "";
-  const q = req.nextUrl.searchParams.get("token") ?? "";
-  return h === ADMIN || q === ADMIN;
+  if (!ADMIN) return false; // locked until configured; header only (no query-string leak)
+  return safeEq(req.headers.get("x-warden-admin") ?? "", ADMIN);
 }
 
 async function payments(): Promise<unknown[]> {
