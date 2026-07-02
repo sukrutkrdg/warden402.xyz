@@ -14,8 +14,8 @@ import { guardAddress, guardTx } from "./guard";
 import { decidePolicy, DEFAULT_POLICY, type AgentPolicy, type FirewallAction, type FirewallResult } from "./firewall";
 import { PERSISTENT, kvPipeline } from "./store";
 
-const g = globalThis as unknown as { __wardenFwKv?: { agents: Map<string, string>; kv: Map<string, string>; sets: Map<string, Set<string>>; lists: Map<string, string[]> } };
-const mem = g.__wardenFwKv ?? (g.__wardenFwKv = { agents: new Map(), kv: new Map(), sets: new Map(), lists: new Map() });
+const g = globalThis as unknown as { __wardenFwKv?: { agents: Map<string, string>; kv: Map<string, string>; sets: Map<string, Set<string>>; lists: Map<string, string[]>; holds: Map<string, Record<string, string>> } };
+const mem = g.__wardenFwKv ?? (g.__wardenFwKv = { agents: new Map(), kv: new Map(), sets: new Map(), lists: new Map(), holds: new Map() });
 
 const hourEpoch = () => Math.floor(Date.now() / 3_600_000);
 const dayEpoch = () => Math.floor(Date.now() / 86_400_000);
@@ -141,26 +141,39 @@ async function seen(id: string, addr: string): Promise<boolean> {
   return mem.sets.get(`fw:seen:${id}`)?.has(a) ?? false;
 }
 
-async function commit(id: string, addr: string, amount: number, isApproval: boolean) {
-  const a = addr.toLowerCase(), h = hourEpoch(), d = dayEpoch();
+/** Atomically add `amount` to the hour+day spend and return the NEW totals.
+ *  Used as reserve-then-verify to close the TOCTOU overspend race. Pass a
+ *  negative amount to roll back. */
+async function reserveSpend(id: string, amount: number): Promise<{ hour: number; day: number }> {
+  const h = hourEpoch(), d = dayEpoch();
   if (PERSISTENT) {
     try {
-      const cmds: (string | number)[][] = [
+      const res = await kvPipeline([
         ["INCRBYFLOAT", `fw:spend:${id}:h:${h}`, amount], ["EXPIRE", `fw:spend:${id}:h:${h}`, 3600],
         ["INCRBYFLOAT", `fw:spend:${id}:d:${d}`, amount], ["EXPIRE", `fw:spend:${id}:d:${d}`, 86400],
-        ["SADD", `fw:seen:${id}`, a],
-      ];
+      ]);
+      return { hour: Number(res[0] ?? 0), day: Number(res[2] ?? 0) };
+    } catch { /* fall */ }
+  }
+  const bump = (k: string, by: number) => { const n = Number(mem.kv.get(k) ?? 0) + by; mem.kv.set(k, String(n)); return n; };
+  return { hour: bump(`fw:spend:${id}:h:${h}`, amount), day: bump(`fw:spend:${id}:d:${d}`, amount) };
+}
+
+/** Commit non-spend side effects after a spend reserve has succeeded. */
+async function commitMeta(id: string, addr: string, amount: number, isApproval: boolean) {
+  const a = addr.toLowerCase(), h = hourEpoch();
+  if (PERSISTENT) {
+    try {
+      const cmds: (string | number)[][] = [["SADD", `fw:seen:${id}`, a]];
       if (isApproval) { cmds.push(["INCR", `fw:appr:${id}:h:${h}`], ["EXPIRE", `fw:appr:${id}:h:${h}`, 3600]); }
       if (amount > 0) { cmds.push(["LPUSH", `fw:spendlist:${id}`, amount], ["LTRIM", `fw:spendlist:${id}`, 0, 19]); }
       await kvPipeline(cmds);
       return;
     } catch { /* fall */ }
   }
-  const bump = (k: string, by: number) => mem.kv.set(k, String(Number(mem.kv.get(k) ?? 0) + by));
-  bump(`fw:spend:${id}:h:${h}`, amount); bump(`fw:spend:${id}:d:${d}`, amount);
   if (!mem.sets.has(`fw:seen:${id}`)) mem.sets.set(`fw:seen:${id}`, new Set());
   mem.sets.get(`fw:seen:${id}`)!.add(a);
-  if (isApproval) bump(`fw:appr:${id}:h:${h}`, 1);
+  if (isApproval) mem.kv.set(`fw:appr:${id}:h:${h}`, String(Number(mem.kv.get(`fw:appr:${id}:h:${h}`) ?? 0) + 1));
   if (amount > 0) { const k = `fw:spendlist:${id}`; const l = mem.lists.get(k) ?? []; l.unshift(String(amount)); mem.lists.set(k, l.slice(0, 20)); }
 }
 
@@ -221,21 +234,64 @@ export async function checkKv(record: AgentRecord, action: FirewallAction): Prom
     seen: isSeen, medianSpend: medianOf(recent),
   });
 
-  if (outcome.commit) await commit(id, action.to, amount, isApproval);
+  // Atomic reserve-then-verify: closes the concurrent-overspend race that a
+  // read-then-check-then-commit sequence leaves open.
+  let final = outcome;
+  if (outcome.commit && amount > 0) {
+    const tot = await reserveSpend(id, amount);
+    if (tot.hour > p.maxPerHourUsd || tot.day > p.maxPerDayUsd) {
+      await reserveSpend(id, -amount); // roll back
+      const reason = tot.hour > p.maxPerHourUsd ? "OVER_HOURLY" : "OVER_DAILY";
+      final = { decision: "deny", reasons: [reason], detail: `Would exceed ${reason === "OVER_HOURLY" ? "hourly" : "daily"} cap (concurrent).`, commit: false };
+    }
+  }
+  if (final.commit) await commitMeta(id, action.to, amount, isApproval);
 
   const result: FirewallResult = {
-    auditId: uid(), agentId: id, decision: outcome.decision, reasons: outcome.reasons, detail: outcome.detail, verdict,
+    auditId: uid(), agentId: id, decision: final.decision, reasons: final.reasons, detail: final.detail, verdict,
     budget: {
       perCallCapUsd: p.maxPerCallUsd,
-      hourSpentUsd: Math.round((hourSpent + (outcome.commit ? amount : 0)) * 100) / 100,
-      hourRemainingUsd: Math.round((p.maxPerHourUsd - hourSpent - (outcome.commit ? amount : 0)) * 100) / 100,
-      daySpentUsd: Math.round((daySpent + (outcome.commit ? amount : 0)) * 100) / 100,
-      dayRemainingUsd: Math.round((p.maxPerDayUsd - daySpent - (outcome.commit ? amount : 0)) * 100) / 100,
-      approvalsThisHour: approvalsHour + (outcome.commit && isApproval ? 1 : 0),
+      hourSpentUsd: Math.round((hourSpent + (final.commit ? amount : 0)) * 100) / 100,
+      hourRemainingUsd: Math.round((p.maxPerHourUsd - hourSpent - (final.commit ? amount : 0)) * 100) / 100,
+      daySpentUsd: Math.round((daySpent + (final.commit ? amount : 0)) * 100) / 100,
+      dayRemainingUsd: Math.round((p.maxPerDayUsd - daySpent - (final.commit ? amount : 0)) * 100) / 100,
+      approvalsThisHour: approvalsHour + (final.commit && isApproval ? 1 : 0),
     },
-    committed: outcome.commit, issuedAt: new Date().toISOString(),
+    committed: final.commit, issuedAt: new Date().toISOString(),
   };
   void audit(id, result, action);
+  if (final.decision === "hold") void persistHold(id, { holdId: result.auditId, action, reasons: final.reasons, amountUsd: amount, createdAt: result.issuedAt, status: "pending" });
   void started;
   return result;
+}
+
+// ── holds (paid path) — persisted so a customer can approve/reject ───
+export interface HoldRec { holdId: string; action: FirewallAction; reasons: string[]; amountUsd: number; createdAt: string; status: "pending" | "approved" | "rejected" }
+async function persistHold(id: string, h: HoldRec) {
+  if (PERSISTENT) { try { await kvPipeline([["HSET", `fw:holds:${id}`, h.holdId, JSON.stringify(h)]]); return; } catch { /* fall */ } }
+  const k = `fw:holds:${id}`; const map = mem.holds.get(k) ?? {}; map[h.holdId] = JSON.stringify(h); mem.holds.set(k, map);
+}
+export async function listHolds(id: string, onlyPending = true): Promise<HoldRec[]> {
+  let out: HoldRec[] = [];
+  if (PERSISTENT) {
+    try { const [flat] = await kvPipeline([["HGETALL", `fw:holds:${id}`]]); const a = (flat as string[]) ?? []; for (let i = 1; i < a.length; i += 2) { try { out.push(JSON.parse(a[i]!)); } catch { /* skip */ } } } catch { /* fall */ }
+  }
+  if (!out.length) out = Object.values(mem.holds.get(`fw:holds:${id}`) ?? {}).map((s: string) => JSON.parse(s));
+  out.sort((x, y) => (x.createdAt < y.createdAt ? 1 : -1));
+  return onlyPending ? out.filter((h) => h.status === "pending") : out;
+}
+export async function resolveHold(id: string, holdId: string, approve: boolean): Promise<{ ok: boolean; error?: string }> {
+  const holds = await listHolds(id, false);
+  const h = holds.find((x) => x.holdId === holdId);
+  if (!h || h.status !== "pending") return { ok: false, error: "not_found_or_resolved" };
+  if (approve) {
+    // Manual approval intentionally overrides the hold; record the spend.
+    if ((h.amountUsd ?? 0) > 0) await reserveSpend(id, h.amountUsd);
+    await commitMeta(id, h.action.to, h.amountUsd ?? 0, h.action.kind === "tx");
+    h.status = "approved";
+  } else {
+    h.status = "rejected";
+  }
+  await persistHold(id, h);
+  return { ok: true };
 }
