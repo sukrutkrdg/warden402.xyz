@@ -91,6 +91,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/firewall" className="hover:text-white">Firewall</Link>
               <Link href="/pricing" className="hover:text-white">Pricing</Link>
               <Link href="/account" className="hover:text-white">Account</Link>
+              <Link href="/team" className="hover:text-white">Team</Link>
               <Link href="/track-record" className="hover:text-white">Track Record</Link>
               <a href="https://github.com/sukrutkrdg/warden402.xyz" className="hover:text-white" target="_blank" rel="noreferrer">GitHub</a>
               <a href="https://x.com/sukrutkrdg" target="_blank" rel="noreferrer" aria-label="X (Twitter)"
