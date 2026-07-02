@@ -8,6 +8,9 @@
  *   BAZAAR_INTERNAL_SECRET   (Bazaar'ı ödemeden çağırmak için; X-Warden-Internal)
  */
 
+import { decodeCalldata, type DecodedCall } from "@warden/core";
+export { decodeCalldata }; // re-export so other web modules keep importing from ./guard
+
 // ── tipler ────────────────────────────────────────────────────────
 export type Decision = "block" | "review" | "clear";
 export type SignalStatus = "ok" | "warn" | "fail" | "unknown";
@@ -183,28 +186,8 @@ async function collectTokenSignals(address: string): Promise<SignalResult[]> {
 }
 
 // ── calldata decode + tx sinyalleri ───────────────────────────────
-const UINT256_MAX = (1n << 256n) - 1n;
-const UINT160_MAX = (1n << 160n) - 1n;
-const UNLIMITED_FLOOR = UINT256_MAX - UINT256_MAX / 100n;
-const UNLIMITED160_FLOOR = UINT160_MAX - UINT160_MAX / 100n;
-interface Decoded { selector: string; kind: string; spender?: string; recipient?: string; amount?: bigint; approvedAll?: boolean; unlimited?: boolean }
-function w(d: string, i: number) { const s = 2 + 8 + i * 64; return d.slice(s, s + 64); }
-function addr(x: string) { return "0x" + x.slice(24); }
-function big(x: string) { return x ? BigInt("0x" + x) : 0n; }
-export function decodeCalldata(calldata?: string): Decoded {
-  const d = (calldata ?? "").toLowerCase();
-  if (!d.startsWith("0x") || d.length < 10) return { selector: "0x", kind: "unknown" };
-  const sel = d.slice(0, 10);
-  const NEED: Record<string, number> = { "0x095ea7b3": 2, "0x39509351": 2, "0xa22cb465": 2, "0xa9059cbb": 2, "0x23b872dd": 3, "0xd505accf": 3, "0x87517c45": 3 };
-  if (NEED[sel] && d.length < 10 + NEED[sel]! * 64) return { selector: sel, kind: "unknown" };
-  if (sel === "0x095ea7b3" || sel === "0x39509351") { const amount = big(w(d, 1)); return { selector: sel, kind: sel === "0x095ea7b3" ? "approve" : "increaseAllowance", spender: addr(w(d, 0)), amount, unlimited: amount >= UNLIMITED_FLOOR }; }
-  if (sel === "0xa22cb465") return { selector: sel, kind: "setApprovalForAll", spender: addr(w(d, 0)), approvedAll: big(w(d, 1)) !== 0n };
-  if (sel === "0xa9059cbb") return { selector: sel, kind: "transfer", recipient: addr(w(d, 0)), amount: big(w(d, 1)) };
-  if (sel === "0x23b872dd") return { selector: sel, kind: "transferFrom", recipient: addr(w(d, 1)), amount: big(w(d, 2)) };
-  if (sel === "0xd505accf") { const amount = big(w(d, 2)); return { selector: sel, kind: "permit", spender: addr(w(d, 1)), amount, unlimited: amount >= UNLIMITED_FLOOR }; } // EIP-2612 permit
-  if (sel === "0x87517c45") { const amount = big(w(d, 2)); return { selector: sel, kind: "permit2Approve", spender: addr(w(d, 1)), amount, unlimited: amount >= UNLIMITED160_FLOOR }; } // Permit2 approve
-  return { selector: sel, kind: "unknown" };
-}
+// decodeCalldata now comes from @warden/core (single source of truth).
+type Decoded = DecodedCall;
 function approvalSignal(dec: Decoded): SignalResult {
   const reasonCodes: ReasonCode[] = []; let status: SignalStatus = "ok"; let score = 0; let detail = `call: ${dec.kind}`;
   const isAppr = ["approve", "increaseAllowance", "permit", "permit2Approve"].includes(dec.kind);
