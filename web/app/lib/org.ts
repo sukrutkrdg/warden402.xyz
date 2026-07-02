@@ -16,7 +16,7 @@ export const canManageMembers = (r: Role | null) => !!r && RANK[r] >= RANK.admin
 export const canManageAgents = (r: Role | null) => !!r && RANK[r] >= RANK.admin;
 export const canManageBilling = (r: Role | null) => r === "owner";
 
-export interface Org { orgId: string; name: string; ownerAddr: string; plan: string; createdAt: string }
+export interface Org { orgId: string; name: string; ownerAddr: string; plan: string; createdAt: string; planExpiresAt?: string }
 
 const g = globalThis as unknown as { __wardenOrg?: { orgs: Map<string, string>; members: Map<string, Record<string, string>>; userOrgs: Map<string, Set<string>>; agents: Map<string, Set<string>> } };
 const mem = g.__wardenOrg ?? (g.__wardenOrg = { orgs: new Map(), members: new Map(), userOrgs: new Map(), agents: new Map() });
@@ -118,4 +118,15 @@ export async function listOrgAgentKeys(orgId: string): Promise<string[]> {
 export async function setOrgPlan(orgId: string, plan: string) {
   const org = await getOrg(orgId); if (!org) return;
   org.plan = plan; await saveOrg(org);
+}
+
+/** Apply a paid subscription to an org: set the plan and extend the expiry by
+ *  `days` (renewal stacks on remaining time). Returns the updated org. */
+export async function applyOrgPayment(orgId: string, plan: string, days = 30): Promise<Org | null> {
+  const org = await getOrg(orgId); if (!org) return null;
+  const base = org.planExpiresAt && Date.now() < new Date(org.planExpiresAt).getTime() ? new Date(org.planExpiresAt).getTime() : Date.now();
+  org.plan = plan;
+  org.planExpiresAt = new Date(base + days * 86_400_000).toISOString();
+  await saveOrg(org);
+  return org;
 }

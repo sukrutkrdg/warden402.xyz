@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { connect as connectWallet, pay } from "../lib/pay";
 
-interface Org { orgId: string; name: string; ownerAddr: string; plan: string }
+interface Org { orgId: string; name: string; ownerAddr: string; plan: string; planExpiresAt?: string }
 interface Member { addr: string; role: "owner" | "admin" | "member" }
 interface OrgAgent { key: string; agentId: string; plan: string; paused: boolean; checksUsed?: number; monthlyCap?: number }
 
@@ -95,6 +96,16 @@ export function TeamPanel() {
     const r = await authFetch("/api/org/agents", { method: "POST", body: JSON.stringify({ orgId: sel.orgId }) }).then((x) => x.json());
     if (r?.key) { setNewKey(r.key); openOrg(sel); } else setErr(r?.error ?? "Could not create agent.");
   }
+  async function payOrg(amountUsd: number) {
+    if (!sel) return;
+    setBusy("pay"); setErr("");
+    try {
+      await connectWallet();
+      const txHash = await pay("USDC", amountUsd);
+      const r = await authFetch("/api/org/subscribe", { method: "POST", body: JSON.stringify({ orgId: sel.orgId, txHash }) }).then((x) => x.json());
+      if (r?.ok) { await openOrg(sel); loadOrgs(); } else setErr(r?.detail ?? r?.error ?? "Payment failed.");
+    } catch (x: any) { setErr(x?.message ?? "Payment failed."); } finally { setBusy(""); }
+  }
 
   // ── not signed in ──
   if (!token) {
@@ -151,7 +162,15 @@ export function TeamPanel() {
                   <h3 className="text-sm font-semibold">{sel.name}</h3>
                   <span className="text-[11px] uppercase text-warden">{sel.plan} plan</span>
                 </div>
-                {sel.plan === "free" && <a href="/pricing" className="mt-2 inline-block text-xs text-warden underline">Upgrade this team →</a>}
+                {sel.planExpiresAt && <div className="mt-1 text-xs text-slate-500">renews/expires {new Date(sel.planExpiresAt).toLocaleDateString("en-US")}</div>}
+                {myRole === "owner" && (
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-slate-500">{sel.plan === "free" ? "Upgrade:" : "Renew / upgrade:"}</span>
+                    <button onClick={() => payOrg(49)} disabled={busy === "pay"} className="rounded-lg border border-edge bg-ink px-3 py-1.5 text-xs hover:border-warden disabled:opacity-50">Starter · $49 USDC</button>
+                    <button onClick={() => payOrg(299)} disabled={busy === "pay"} className="rounded-lg border border-edge bg-ink px-3 py-1.5 text-xs hover:border-warden disabled:opacity-50">Team · $299 USDC</button>
+                    {busy === "pay" && <span className="text-xs text-review">check your wallet…</span>}
+                  </div>
+                )}
               </div>
 
               {/* members */}
