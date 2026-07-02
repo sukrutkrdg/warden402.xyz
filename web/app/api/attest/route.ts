@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ATTEST_ENABLED, BUILDER_CODE, SCHEMA, SCHEMA_UID, attestVerdict, attesterAddress, computeSchemaUID, easscanTx, registerSchema } from "../../lib/eas";
+import { ATTEST_ENABLED, BUILDER_CODE, SCHEMA, SCHEMA_UID, attestVerdict, attesterAddress, computeSchemaUID, easscanTx, isSchemaRegistered, registerSchema } from "../../lib/eas";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
     builderCode: BUILDER_CODE,
     schema: SCHEMA,
     schemaUID: SCHEMA_UID ?? computeSchemaUID(),
-    schemaRegistered: Boolean(SCHEMA_UID),
+    schemaRegistered: await isSchemaRegistered(),
     attester: ATTEST_ENABLED ? await attesterAddress().catch(() => null) : null,
     chain: "base",
   });

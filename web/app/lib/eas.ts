@@ -27,6 +27,7 @@ export const ATTEST_ENABLED = Boolean(KEY);
 const DECISION_CODE: Record<string, number> = { clear: 0, review: 1, block: 2 };
 
 const REGISTER_ABI = [{ type: "function", name: "register", stateMutability: "nonpayable", inputs: [{ name: "schema", type: "string" }, { name: "resolver", type: "address" }, { name: "revocable", type: "bool" }], outputs: [{ type: "bytes32" }] }] as const;
+const GET_SCHEMA_ABI = [{ type: "function", name: "getSchema", stateMutability: "view", inputs: [{ name: "uid", type: "bytes32" }], outputs: [{ type: "tuple", components: [{ name: "uid", type: "bytes32" }, { name: "resolver", type: "address" }, { name: "revocable", type: "bool" }, { name: "schema", type: "string" }] }] }] as const;
 const ATTEST_ABI = [{ type: "function", name: "attest", stateMutability: "payable", inputs: [{ name: "request", type: "tuple", components: [{ name: "schema", type: "bytes32" }, { name: "data", type: "tuple", components: [{ name: "recipient", type: "address" }, { name: "expirationTime", type: "uint64" }, { name: "revocable", type: "bool" }, { name: "refUID", type: "bytes32" }, { name: "data", type: "bytes" }, { name: "value", type: "uint256" }] }] }], outputs: [{ type: "bytes32" }] }] as const;
 
 function account() {
@@ -68,6 +69,17 @@ export async function attestVerdict(v: VerdictAttestation): Promise<{ txHash: st
   }));
   const txHash = await wallet().sendTransaction({ to: EAS_ADDRESS, data });
   return { txHash };
+}
+
+/** Read the actual on-chain registration state (not just the env var). */
+export async function isSchemaRegistered(): Promise<boolean> {
+  try {
+    const uid = SCHEMA_UID ?? computeSchemaUID();
+    const r = (await publicClient.readContract({ address: SCHEMA_REGISTRY, abi: GET_SCHEMA_ABI, functionName: "getSchema", args: [uid] })) as { schema: string };
+    return Boolean(r?.schema && r.schema.length > 0);
+  } catch {
+    return false;
+  }
 }
 
 export const easscanTx = (hash: string) => `https://base.easscan.org/tx/${hash}`;
