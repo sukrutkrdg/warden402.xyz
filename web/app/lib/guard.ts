@@ -184,7 +184,9 @@ async function collectTokenSignals(address: string): Promise<SignalResult[]> {
 
 // ── calldata decode + tx sinyalleri ───────────────────────────────
 const UINT256_MAX = (1n << 256n) - 1n;
+const UINT160_MAX = (1n << 160n) - 1n;
 const UNLIMITED_FLOOR = UINT256_MAX - UINT256_MAX / 100n;
+const UNLIMITED160_FLOOR = UINT160_MAX - UINT160_MAX / 100n;
 interface Decoded { selector: string; kind: string; spender?: string; recipient?: string; amount?: bigint; approvedAll?: boolean; unlimited?: boolean }
 function w(d: string, i: number) { const s = 2 + 8 + i * 64; return d.slice(s, s + 64); }
 function addr(x: string) { return "0x" + x.slice(24); }
@@ -197,13 +199,16 @@ export function decodeCalldata(calldata?: string): Decoded {
   if (sel === "0xa22cb465") return { selector: sel, kind: "setApprovalForAll", spender: addr(w(d, 0)), approvedAll: big(w(d, 1)) !== 0n };
   if (sel === "0xa9059cbb") return { selector: sel, kind: "transfer", recipient: addr(w(d, 0)), amount: big(w(d, 1)) };
   if (sel === "0x23b872dd") return { selector: sel, kind: "transferFrom", recipient: addr(w(d, 1)), amount: big(w(d, 2)) };
+  if (sel === "0xd505accf") { const amount = big(w(d, 2)); return { selector: sel, kind: "permit", spender: addr(w(d, 1)), amount, unlimited: amount >= UNLIMITED_FLOOR }; } // EIP-2612 permit
+  if (sel === "0x87517c45") { const amount = big(w(d, 2)); return { selector: sel, kind: "permit2Approve", spender: addr(w(d, 1)), amount, unlimited: amount >= UNLIMITED160_FLOOR }; } // Permit2 approve
   return { selector: sel, kind: "unknown" };
 }
 function approvalSignal(dec: Decoded): SignalResult {
   const reasonCodes: ReasonCode[] = []; let status: SignalStatus = "ok"; let score = 0; let detail = `call: ${dec.kind}`;
+  const isAppr = ["approve", "increaseAllowance", "permit", "permit2Approve"].includes(dec.kind);
   if (dec.kind === "setApprovalForAll" && dec.approvedAll) { status = "fail"; score = 90; reasonCodes.push("DANGEROUS_APPROVAL"); detail = "setApprovalForAll(true) — approval over all NFTs"; }
-  else if ((dec.kind === "approve" || dec.kind === "increaseAllowance") && dec.unlimited) { status = "fail"; score = 80; reasonCodes.push("DANGEROUS_APPROVAL"); detail = "unlimited ERC20 allowance"; }
-  else if ((dec.kind === "approve" || dec.kind === "increaseAllowance") && (dec.amount ?? 0n) > 0n) { status = "warn"; score = 40; reasonCodes.push("DANGEROUS_APPROVAL"); detail = "ERC20 allowance (limited)"; }
+  else if (isAppr && dec.unlimited) { status = "fail"; score = 80; reasonCodes.push("DANGEROUS_APPROVAL"); detail = `unlimited allowance (${dec.kind})`; }
+  else if (isAppr && (dec.amount ?? 0n) > 0n) { status = "warn"; score = 40; reasonCodes.push("DANGEROUS_APPROVAL"); detail = `allowance granted (${dec.kind})`; }
   return { category: "approvals", status, weight: 0.30, score, source: "calldata-decode", detail, evidence: { reasonCodes } };
 }
 async function txContractRisk(counterparty: string): Promise<SignalResult> {

@@ -39,6 +39,27 @@ describe("decodeCalldata() — drain detection", () => {
     expect(d.recipient?.toLowerCase()).toBe("0x" + SPENDER);
   });
 
+  it("EIP-2612 permit with unlimited value is flagged", () => {
+    const d = decodeCalldata("0xd505accf" + addr("0".repeat(40)) + addr(SPENDER) + MAX);
+    expect(d.kind).toBe("permit");
+    expect(d.unlimited).toBe(true);
+    expect(d.spender?.toLowerCase()).toBe("0x" + SPENDER);
+  });
+
+  it("Permit2 approve with uint160 max is flagged unlimited", () => {
+    const u160max = "0".repeat(24) + "f".repeat(40); // type(uint160).max
+    const d = decodeCalldata("0x87517c45" + addr("0".repeat(40)) + addr(SPENDER) + u160max);
+    expect(d.kind).toBe("permit2Approve");
+    expect(d.unlimited).toBe(true);
+  });
+
+  it("Permit2 approve with small amount is not unlimited", () => {
+    const small = "0".repeat(60) + "2710";
+    const d = decodeCalldata("0x87517c45" + addr("0".repeat(40)) + addr(SPENDER) + small);
+    expect(d.kind).toBe("permit2Approve");
+    expect(d.unlimited).toBe(false);
+  });
+
   it("unknown selector → unknown", () => {
     expect(decodeCalldata("0xdeadbeef").kind).toBe("unknown");
     expect(decodeCalldata("0x").kind).toBe("unknown");

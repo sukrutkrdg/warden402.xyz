@@ -36,15 +36,16 @@ export function approvalSignal(decoded: DecodedCall): SignalResult {
   let score = 0;
   let detail = `call: ${decoded.kind}`;
 
+  const isAppr = ["approve", "increaseAllowance", "permit", "permit2Approve"].includes(decoded.kind);
   if (decoded.kind === "setApprovalForAll" && decoded.approvedAll) {
     status = "fail"; score = 90; reasonCodes.push("DANGEROUS_APPROVAL");
     detail = "setApprovalForAll(true) — unlimited approval over all NFTs";
-  } else if ((decoded.kind === "approve" || decoded.kind === "increaseAllowance") && decoded.unlimited) {
+  } else if (isAppr && decoded.unlimited) {
     status = "fail"; score = 80; reasonCodes.push("DANGEROUS_APPROVAL");
-    detail = "unlimited ERC20 allowance (uint256 max)";
-  } else if ((decoded.kind === "approve" || decoded.kind === "increaseAllowance") && (decoded.amount ?? 0n) > 0n) {
+    detail = `unlimited allowance (${decoded.kind})`;
+  } else if (isAppr && (decoded.amount ?? 0n) > 0n) {
     status = "warn"; score = 40; reasonCodes.push("DANGEROUS_APPROVAL");
-    detail = "ERC20 allowance granted (limited)";
+    detail = `allowance granted (${decoded.kind})`;
   }
 
   return {

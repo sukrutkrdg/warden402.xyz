@@ -211,7 +211,7 @@ export async function checkKv(record: AgentRecord, action: FirewallAction): Prom
   if (action.kind === "tx") {
     verdict = await guardTx({ from: action.from ?? action.to, to: action.to, calldata: action.calldata });
     const dec = verdict.decoded;
-    isApproval = dec ? ["approve", "increaseAllowance", "setApprovalForAll"].includes(dec.kind) : false;
+    isApproval = dec ? ["approve", "increaseAllowance", "setApprovalForAll", "permit", "permit2Approve"].includes(dec.kind) : false;
     unlimited = Boolean(dec?.unlimited || dec?.approvedAll);
   } else {
     verdict = await guardAddress(action.to);

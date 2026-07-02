@@ -41,6 +41,8 @@ describe("drift guard: src engine === web engine", () => {
     "0x095ea7b3" + "000000000000000000000000" + SPENDER + ("0".repeat(60) + "2710"), // limited approve
     "0xa22cb465" + "000000000000000000000000" + SPENDER + ("0".repeat(63) + "1"), // setApprovalForAll true
     "0xa9059cbb" + "000000000000000000000000" + SPENDER + ("0".repeat(60) + "2710"), // transfer
+    "0xd505accf" + "000000000000000000000000" + "0".repeat(40) + "000000000000000000000000" + SPENDER + "f".repeat(64), // permit unlimited
+    "0x87517c45" + "000000000000000000000000" + "0".repeat(40) + "000000000000000000000000" + SPENDER + ("0".repeat(24) + "f".repeat(40)), // permit2 uint160 max
     "0xdeadbeef",
     "0x",
   ];

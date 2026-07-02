@@ -14,6 +14,8 @@ export interface DecodedCall {
     | "approve"
     | "increaseAllowance"
     | "setApprovalForAll"
+    | "permit"          // EIP-2612 permit (gasless allowance)
+    | "permit2Approve"  // Uniswap Permit2 approve
     | "transfer"
     | "transferFrom"
     | "unknown";
@@ -30,11 +32,15 @@ const SELECTORS = {
   setApprovalForAll: "0xa22cb465",  // setApprovalForAll(address,bool)
   transfer: "0xa9059cbb",           // transfer(address,uint256)
   transferFrom: "0x23b872dd",       // transferFrom(address,address,uint256)
+  permit: "0xd505accf",             // permit(owner,spender,value,deadline,v,r,s)
+  permit2Approve: "0x87517c45",     // Permit2 approve(token,spender,uint160 amount,uint48 expiration)
 } as const;
 
 const UINT256_MAX = (1n << 256n) - 1n;
+const UINT160_MAX = (1n << 160n) - 1n;
 /** uint256 max'ın %1'inden fazlası → pratikte "sınırsız" muamelesi. */
 const UNLIMITED_FLOOR = UINT256_MAX - UINT256_MAX / 100n;
+const UNLIMITED160_FLOOR = UINT160_MAX - UINT160_MAX / 100n;
 
 function word(data: string, index: number): string {
   // data: 0x + selector(8) + words(64 each). index 0 = ilk word.
@@ -80,6 +86,18 @@ export function decodeCalldata(calldata: string | undefined): DecodedCall {
       const recipient = addrFromWord(word(data, 1)); // (from, to, amount)
       const amount = bigFromWord(word(data, 2));
       return { selector, kind: "transferFrom", recipient, amount };
+    }
+    case SELECTORS.permit: {
+      // permit(owner, spender, value, deadline, v, r, s)
+      const spender = addrFromWord(word(data, 1));
+      const amount = bigFromWord(word(data, 2));
+      return { selector, kind: "permit", spender, amount, unlimited: amount >= UNLIMITED_FLOOR };
+    }
+    case SELECTORS.permit2Approve: {
+      // Permit2 approve(token, spender, uint160 amount, uint48 expiration)
+      const spender = addrFromWord(word(data, 1));
+      const amount = bigFromWord(word(data, 2));
+      return { selector, kind: "permit2Approve", spender, amount, unlimited: amount >= UNLIMITED160_FLOOR };
     }
     default:
       return { selector, kind: "unknown" };
