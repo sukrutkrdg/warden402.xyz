@@ -38,6 +38,12 @@ export function AccountPanel() {
     localStorage.setItem("warden_key", k); setKey(k);
   }
   function signOut() { localStorage.removeItem("warden_key"); setKey(""); setState(null); setAudit([]); setInput(""); }
+  async function rotate() {
+    if (!confirm("Rotate your key? The current key will stop working immediately.")) return;
+    const r = await fetch("/api/v1/rotate", { method: "POST", headers: { "x-warden-agent-key": key } }).then((x) => x.json()).catch(() => null);
+    if (r?.key) { localStorage.setItem("warden_key", r.key); setInput(r.key); setKey(r.key); alert("New key:\n" + r.key + "\n\nStore it — shown once."); }
+    else setError("Rotate failed.");
+  }
 
   if (!key || !state) {
     return (
@@ -59,7 +65,10 @@ export function AccountPanel() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div className="text-sm text-slate-400">agent <span className="font-mono text-slate-200">{state.agentId}</span></div>
-        <button onClick={signOut} className="text-xs text-slate-500 underline hover:text-white">sign out</button>
+        <div className="flex items-center gap-3">
+          <button onClick={rotate} className="text-xs text-review underline hover:brightness-125">rotate key</button>
+          <button onClick={signOut} className="text-xs text-slate-500 underline hover:text-white">sign out</button>
+        </div>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3">

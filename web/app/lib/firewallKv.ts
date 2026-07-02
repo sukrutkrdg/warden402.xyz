@@ -100,6 +100,20 @@ export async function revokeAgent(keyPrefix: string): Promise<{ ok: boolean }> {
   return { ok: true };
 }
 
+/** Rotate an agent's key: issue a new key with the same record (plan, expiry,
+ *  quota — usage is keyed by agentId so it carries over), revoke the old one. */
+export async function rotateKey(oldKey: string): Promise<{ key: string } | null> {
+  const rec = await getAgent(oldKey);
+  if (!rec) return null;
+  const key = genKey();
+  const val = JSON.stringify(rec);
+  if (PERSISTENT) {
+    try { await kvPipeline([["SET", `fw:agent:${key}`, val], ["SADD", "fw:index", key], ["DEL", `fw:agent:${oldKey}`], ["SREM", "fw:index", oldKey]]); return { key }; } catch { /* fall */ }
+  }
+  mem.agents.set(key, val); mem.agents.delete(oldKey);
+  return { key };
+}
+
 export async function getAgent(key: string | undefined): Promise<AgentRecord | null> {
   if (!key) return null;
   if (PERSISTENT) {
