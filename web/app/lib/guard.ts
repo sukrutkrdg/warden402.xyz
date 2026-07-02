@@ -195,6 +195,8 @@ export function decodeCalldata(calldata?: string): Decoded {
   const d = (calldata ?? "").toLowerCase();
   if (!d.startsWith("0x") || d.length < 10) return { selector: "0x", kind: "unknown" };
   const sel = d.slice(0, 10);
+  const NEED: Record<string, number> = { "0x095ea7b3": 2, "0x39509351": 2, "0xa22cb465": 2, "0xa9059cbb": 2, "0x23b872dd": 3, "0xd505accf": 3, "0x87517c45": 3 };
+  if (NEED[sel] && d.length < 10 + NEED[sel]! * 64) return { selector: sel, kind: "unknown" };
   if (sel === "0x095ea7b3" || sel === "0x39509351") { const amount = big(w(d, 1)); return { selector: sel, kind: sel === "0x095ea7b3" ? "approve" : "increaseAllowance", spender: addr(w(d, 0)), amount, unlimited: amount >= UNLIMITED_FLOOR }; }
   if (sel === "0xa22cb465") return { selector: sel, kind: "setApprovalForAll", spender: addr(w(d, 0)), approvedAll: big(w(d, 1)) !== 0n };
   if (sel === "0xa9059cbb") return { selector: sel, kind: "transfer", recipient: addr(w(d, 0)), amount: big(w(d, 1)) };

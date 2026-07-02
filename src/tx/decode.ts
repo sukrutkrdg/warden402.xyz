@@ -61,6 +61,10 @@ export function decodeCalldata(calldata: string | undefined): DecodedCall {
   }
   const selector = data.slice(0, 10);
 
+  // Reject truncated calldata: too short for the selector's args → undecodable.
+  const NEED: Record<string, number> = { "0x095ea7b3": 2, "0x39509351": 2, "0xa22cb465": 2, "0xa9059cbb": 2, "0x23b872dd": 3, "0xd505accf": 3, "0x87517c45": 3 };
+  if (NEED[selector] && data.length < 10 + NEED[selector]! * 64) return { selector, kind: "unknown" };
+
   switch (selector) {
     case SELECTORS.approve: {
       const spender = addrFromWord(word(data, 0));

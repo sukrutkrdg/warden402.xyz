@@ -22,6 +22,11 @@ export async function GET() {
     const p = (j.data && typeof j.data === "object" ? (j.data as Record<string, unknown>) : j) as Record<string, unknown>;
     const usd = num(p.priceUsd) ?? num(p.price) ?? num(p.usd);
     if (!usd) return NextResponse.json({ error: "price_unavailable" }, { status: 502 });
+    // Sanity bounds — reject a stale/zero/manipulated price so it can't distort
+    // checkout amounts or plan mapping.
+    const MIN = Number(process.env.ETH_PRICE_MIN ?? 200);
+    const MAX = Number(process.env.ETH_PRICE_MAX ?? 100000);
+    if (usd < MIN || usd > MAX) return NextResponse.json({ error: "price_out_of_range", usd }, { status: 502 });
     return NextResponse.json({ usd });
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 502 });

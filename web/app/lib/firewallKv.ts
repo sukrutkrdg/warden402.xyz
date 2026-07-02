@@ -26,6 +26,7 @@ export interface AgentRecord {
   agentId: string; policy: AgentPolicy; createdAt: string;
   plan: "free" | "starter" | "team" | "enterprise";
   monthlyCap: number; expiresAt?: string; payer?: string; txHash?: string;
+  webhookUrl?: string; // POSTed on every hold (fire-and-forget)
 }
 
 export const PLAN_CAP: Record<AgentRecord["plan"], number> = { free: 1000, starter: 20000, team: 100000, enterprise: 5_000_000 };
@@ -142,6 +143,31 @@ function medianOf(arr: number[]): number | undefined {
   if (arr.length < 3) return undefined;
   const a = [...arr].sort((x, y) => x - y); const m = Math.floor(a.length / 2);
   return a.length % 2 ? a[m]! : (a[m - 1]! + a[m]!) / 2;
+}
+
+// ── webhooks (notify on hold) ──────────────────────────────────────
+function safeWebhookUrl(u: string): boolean {
+  try {
+    const url = new URL(u);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return false;
+    const h = url.hostname.toLowerCase();
+    if (h === "localhost" || h.endsWith(".local")) return false;
+    if (/^(127\.|10\.|192\.168\.|169\.254\.|0\.)/.test(h)) return false;
+    if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(h)) return false;
+    return true;
+  } catch { return false; }
+}
+async function notifyWebhook(url: string, payload: unknown) {
+  if (!safeWebhookUrl(url)) return;
+  const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 4000);
+  try { await fetch(url, { method: "POST", headers: { "content-type": "application/json", "user-agent": "warden-webhook" }, body: JSON.stringify(payload), signal: ctrl.signal }); } catch { /* fire-and-forget */ } finally { clearTimeout(t); }
+}
+export async function setWebhook(key: string, url: string | null): Promise<{ ok: boolean; error?: string }> {
+  const rec = await getAgent(key); if (!rec) return { ok: false, error: "unknown_agent" };
+  if (url && !safeWebhookUrl(url)) return { ok: false, error: "invalid_url" };
+  rec.webhookUrl = url ?? undefined;
+  await saveAgent(key, rec);
+  return { ok: true };
 }
 export async function getUsage(record: AgentRecord) {
   const used = await num(["GET", `fw:checks:${record.agentId}:m:${monthEpoch()}`], `fw:checks:${record.agentId}:m:${monthEpoch()}`);
@@ -274,7 +300,10 @@ export async function checkKv(record: AgentRecord, action: FirewallAction): Prom
     committed: final.commit, issuedAt: new Date().toISOString(),
   };
   void audit(id, result, action);
-  if (final.decision === "hold") void persistHold(id, { holdId: result.auditId, action, reasons: final.reasons, amountUsd: amount, createdAt: result.issuedAt, status: "pending" });
+  if (final.decision === "hold") {
+    void persistHold(id, { holdId: result.auditId, action, reasons: final.reasons, amountUsd: amount, createdAt: result.issuedAt, status: "pending" });
+    if (record.webhookUrl) void notifyWebhook(record.webhookUrl, { event: "hold", agentId: id, holdId: result.auditId, action, reasons: final.reasons, at: result.issuedAt });
+  }
   void started;
   return result;
 }

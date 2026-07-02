@@ -60,6 +60,10 @@ describe("decodeCalldata() — drain detection", () => {
     expect(d.unlimited).toBe(false);
   });
 
+  it("truncated approve calldata → unknown (not a benign zero-approve)", () => {
+    expect(decodeCalldata("0x095ea7b3" + addr(SPENDER)).kind).toBe("unknown"); // missing amount word
+  });
+
   it("unknown selector → unknown", () => {
     expect(decodeCalldata("0xdeadbeef").kind).toBe("unknown");
     expect(decodeCalldata("0x").kind).toBe("unknown");
