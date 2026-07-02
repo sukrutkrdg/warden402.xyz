@@ -30,7 +30,7 @@ export function AdminPanel() {
   async function easOp(payload: object, label: string) {
     setEasMsg(label + "…");
     const r = await fetch("/api/attest", { method: "POST", headers: { "content-type": "application/json", "x-warden-admin": token }, body: JSON.stringify(payload) }).then((x) => x.json()).catch((e) => ({ error: String(e) }));
-    setEasMsg(r.error ? `error: ${r.detail ?? r.error}` : (r.easscan ? `sent: ${r.easscan}` : "done"));
+    setEasMsg(r.error ? `error: ${r.detail ?? r.error}` : (r.easscan || r.basescan ? `sent: ${r.easscan || r.basescan}` : "done"));
     load();
   }
   async function act(payload: object, label: string) {

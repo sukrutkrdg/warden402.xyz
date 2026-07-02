@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ATTEST_ENABLED, BUILDER_CODE, SCHEMA, SCHEMA_UID, attestVerdict, attesterAddress, computeSchemaUID, easscanTx, isSchemaRegistered, registerSchema } from "../../lib/eas";
+import { ATTEST_ENABLED, BUILDER_CODE, SCHEMA, SCHEMA_UID, attestVerdict, attesterAddress, computeSchemaUID, easscanAttestation, easscanTx, isSchemaRegistered, registerSchema } from "../../lib/eas";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
     if (body?.op === "attest") {
       if (!/^0x[a-fA-F0-9]{40}$/.test(body.target ?? "")) return NextResponse.json({ error: "invalid target" }, { status: 400 });
       const r = await attestVerdict({ target: body.target, decision: String(body.decision ?? "review"), riskScore: Number(body.riskScore ?? 0), reasons: Array.isArray(body.reasons) ? body.reasons : [] });
-      return NextResponse.json({ ...r, easscan: easscanTx(r.txHash) });
+      return NextResponse.json({ ...r, basescan: easscanTx(r.txHash), easscan: r.uid ? easscanAttestation(r.uid) : null });
     }
     return NextResponse.json({ error: "invalid op" }, { status: 400 });
   } catch (e) {

@@ -62,8 +62,8 @@ export async function registerSchema(): Promise<{ txHash: string; schemaUID: str
 
 export interface VerdictAttestation { target: string; decision: string; riskScore: number; reasons: string[] }
 
-/** Write a verdict on-chain as an EAS attestation. Returns the tx hash. */
-export async function attestVerdict(v: VerdictAttestation): Promise<{ txHash: string }> {
+/** Write a verdict on-chain as an EAS attestation. Returns tx hash + attestation UID. */
+export async function attestVerdict(v: VerdictAttestation): Promise<{ txHash: string; uid: string | null }> {
   const schema = SCHEMA_UID ?? computeSchemaUID();
   const encoded = encodeAbiParameters(
     [{ type: "address" }, { type: "uint8" }, { type: "uint8" }, { type: "string" }],
@@ -74,7 +74,13 @@ export async function attestVerdict(v: VerdictAttestation): Promise<{ txHash: st
     args: [{ schema, data: { recipient: v.target as `0x${string}`, expirationTime: 0n, revocable: true, refUID: "0x0000000000000000000000000000000000000000000000000000000000000000", data: encoded, value: 0n } }],
   }));
   const txHash = await wallet().sendTransaction({ to: EAS_ADDRESS, data });
-  return { txHash };
+  let uid: string | null = null;
+  try {
+    const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+    const log = receipt.logs.find((l) => l.address.toLowerCase() === EAS_ADDRESS.toLowerCase());
+    if (log?.data && log.data.length >= 66) uid = log.data.slice(0, 66);
+  } catch { /* uid best-effort */ }
+  return { txHash, uid };
 }
 
 /** Read the actual on-chain registration state (not just the env var). */
@@ -88,6 +94,8 @@ export async function isSchemaRegistered(): Promise<boolean> {
   }
 }
 
-export const easscanTx = (hash: string) => `https://base.easscan.org/tx/${hash}`;
+// BaseScan reliably renders any tx; EAS Scan indexes by attestation UID, not tx.
+export const easscanTx = (hash: string) => `https://basescan.org/tx/${hash}`;
+export const easscanAttestation = (uid: string) => `https://base.easscan.org/attestation/view/${uid}`;
 export async function attesterAddress(): Promise<string> { return account().address; }
 export { publicClient };
