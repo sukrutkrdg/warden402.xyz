@@ -32,7 +32,10 @@ function discover(): void {
   discoveryStarted = true;
   window.addEventListener("eip6963:announceProvider", (ev) => {
     const d = (ev as CustomEvent<{ info?: { name?: string; icon?: string; rdns?: string }; provider?: Eip1193 }>).detail;
-    if (d?.provider && !announced.some((a) => a.provider === d.provider)) {
+    // Dedup by rdns/name too — some wallets (e.g. Backpack) announce twice with
+    // distinct provider objects, which showed up as duplicate picker entries.
+    const dup = announced.some((a) => a.provider === d?.provider || (d?.info?.rdns && a.rdns === d.info.rdns) || a.name === d?.info?.name);
+    if (d?.provider && !dup) {
       announced.push({ name: d.info?.name ?? "Wallet", icon: d.info?.icon, rdns: d.info?.rdns, provider: d.provider });
     }
   });
