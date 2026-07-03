@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { connect as connectWallet, pay, walletRequest } from "../lib/pay";
+import { pay, walletRequest } from "../lib/pay";
+import { WalletPicker } from "./WalletPicker";
 
 interface Org { orgId: string; name: string; ownerAddr: string; plan: string; planExpiresAt?: string }
 interface Member { addr: string; role: "owner" | "admin" | "member" }
@@ -39,15 +40,6 @@ export function TeamPanel() {
   }, [authFetch]);
 
   useEffect(() => { if (token) loadOrgs(); }, [token, loadOrgs]);
-
-  async function connect() {
-    setErr("");
-    try {
-      // Shared wallet layer: EIP-6963 discovery + skips extensions without an account.
-      const a = await connectWallet();
-      if (a) setAddress(a);
-    } catch (x: any) { setErr(x?.message ?? "Wallet connection rejected."); }
-  }
 
   async function signIn() {
     setErr(""); setBusy("signin");
@@ -96,7 +88,7 @@ export function TeamPanel() {
     if (!sel) return;
     setBusy("pay"); setErr("");
     try {
-      await connectWallet();
+      // pay() connects through the provider the WalletPicker selected.
       const txHash = await pay("USDC", amountUsd);
       const r = await authFetch("/api/org/subscribe", { method: "POST", body: JSON.stringify({ orgId: sel.orgId, txHash }) }).then((x) => x.json());
       if (r?.ok) { await openOrg(sel); loadOrgs(); } else setErr(r?.detail ?? r?.error ?? "Payment failed.");
@@ -108,7 +100,7 @@ export function TeamPanel() {
     return (
       <div className="max-w-md space-y-4 rounded-xl border border-edge bg-panel/60 p-6">
         {!address ? (
-          <button onClick={connect} className="w-full rounded-lg bg-warden px-4 py-2.5 text-sm font-semibold text-ink hover:brightness-110">Connect Wallet</button>
+          <WalletPicker onConnected={setAddress} onError={setErr} />
         ) : (
           <>
             <div className="text-xs text-slate-400">connected <span className="font-mono text-slate-200">{address.slice(0, 8)}…{address.slice(-4)}</span></div>

@@ -22,7 +22,7 @@ interface Eip1193 {
 // "wins" injection may have no account set up (users then see errors like
 // "wallet must has at least one account"). EIP-6963 lets every installed
 // wallet announce itself, so we can pick one that actually works.
-interface Announced { name: string; provider: Eip1193 }
+interface Announced { name: string; icon?: string; rdns?: string; provider: Eip1193 }
 const announced: Announced[] = [];
 let selected: Eip1193 | null = null;
 let discoveryStarted = false;
@@ -31,12 +31,40 @@ function discover(): void {
   if (discoveryStarted || typeof window === "undefined") return;
   discoveryStarted = true;
   window.addEventListener("eip6963:announceProvider", (ev) => {
-    const d = (ev as CustomEvent<{ info?: { name?: string }; provider?: Eip1193 }>).detail;
+    const d = (ev as CustomEvent<{ info?: { name?: string; icon?: string; rdns?: string }; provider?: Eip1193 }>).detail;
     if (d?.provider && !announced.some((a) => a.provider === d.provider)) {
-      announced.push({ name: d.info?.name ?? "Wallet", provider: d.provider });
+      announced.push({ name: d.info?.name ?? "Wallet", icon: d.info?.icon, rdns: d.info?.rdns, provider: d.provider });
     }
   });
   window.dispatchEvent(new Event("eip6963:requestProvider")); // wallets reply synchronously
+}
+
+// ── explicit wallet choice (the fix for multi-extension browsers) ──
+// Auto-picking a provider stalls when the "wrong" extension swallows the
+// request, so the UI lists every installed wallet and connects only the one
+// the user taps.
+export interface WalletOption { id: string; name: string; icon?: string }
+
+export function listWallets(): WalletOption[] {
+  discover();
+  const opts: WalletOption[] = announced.map((a, i) => ({ id: a.rdns || `announced-${i}`, name: a.name, icon: a.icon }));
+  if (!opts.length) {
+    const legacy = (globalThis as { ethereum?: Eip1193 }).ethereum;
+    if (legacy) opts.push({ id: "injected", name: legacy.isMetaMask ? "MetaMask" : legacy.isCoinbaseWallet ? "Coinbase Wallet" : "Browser wallet" });
+  }
+  return opts;
+}
+
+/** Connect a specific wallet from listWallets(); it becomes the session provider. */
+export async function connectWith(id: string): Promise<string> {
+  discover();
+  const found = announced.find((a, i) => (a.rdns || `announced-${i}`) === id)?.provider
+    ?? (globalThis as { ethereum?: Eip1193 }).ethereum;
+  if (!found) throw new Error("Wallet not found. Reload and try again.");
+  const accs = ((await found.request({ method: "eth_requestAccounts" })) as string[]) ?? [];
+  if (!accs.length) throw new Error("This wallet has no account. Unlock it or create/import an account, then retry.");
+  selected = found;
+  return accs[0]!;
 }
 
 const rank = (p: Eip1193) => (p.isMetaMask ? 0 : p.isCoinbaseWallet ? 1 : 2);

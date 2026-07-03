@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { PAY_TO, connect, explorerTx, pay, signClaim, type PayToken } from "../lib/pay";
+import { WalletPicker } from "./WalletPicker";
 
 export function CryptoCheckout({ planName, defaultAmountUsd }: { planName: string; defaultAmountUsd: number }) {
   const [token, setToken] = useState<PayToken>("USDC");
@@ -12,17 +13,14 @@ export function CryptoCheckout({ planName, defaultAmountUsd }: { planName: strin
   const [error, setError] = useState<string>("");
   const [hasWallet, setHasWallet] = useState<boolean | null>(null);
   const [account, setAccount] = useState<string>("");
-  const [connecting, setConnecting] = useState(false);
   const [verified, setVerified] = useState<{ token: string; amount: number } | null>(null);
   const [unconfirmed, setUnconfirmed] = useState(false);
   const [sub, setSub] = useState<{ key: string; plan: string; expiresAt: string } | null>(null);
 
-  async function onConnect() {
-    setConnecting(true); setError("");
-    try { setAccount(await connect()); }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
-    finally { setConnecting(false); }
-  }
+  // The plan is activated server-side from the on-chain amount, with a hard
+  // minimum — paying less silently buys nothing, so block it in the UI too.
+  const minUsd = defaultAmountUsd;
+  const belowMin = !Number.isFinite(amount) || amount < minUsd;
 
   useEffect(() => {
     setHasWallet(typeof window !== "undefined" && Boolean((window as { ethereum?: unknown }).ethereum));
@@ -97,6 +95,9 @@ export function CryptoCheckout({ planName, defaultAmountUsd }: { planName: strin
           </span>{" "}
           on Base
         </div>
+        {belowMin && (
+          <div className="mt-2 text-xs text-review">Minimum for {planName}: ${minUsd} — a smaller payment will not activate the plan.</div>
+        )}
       </div>
 
       {/* pay to */}
@@ -113,16 +114,15 @@ export function CryptoCheckout({ planName, defaultAmountUsd }: { planName: strin
           <p className="mt-1 text-xs text-slate-500">On mobile, open warden402.xyz inside your wallet app&apos;s browser.</p>
         </div>
       ) : !account ? (
-        <button onClick={onConnect} disabled={connecting}
-          className="mt-5 w-full rounded-lg border border-warden bg-warden/10 px-4 py-3 text-sm font-semibold text-warden transition hover:bg-warden/20 disabled:opacity-50">
-          {connecting ? "Opening wallet…" : "Connect wallet"}
-        </button>
+        <div className="mt-5">
+          <WalletPicker onConnected={setAccount} onError={setError} label="Connect wallet" />
+        </div>
       ) : (
         <>
           <div className="mt-4 text-xs text-slate-500">connected: <span className="font-mono text-slate-300">{account.slice(0, 6)}…{account.slice(-4)}</span></div>
-          <button onClick={onPay} disabled={status === "paying"}
+          <button onClick={onPay} disabled={status === "paying" || belowMin}
             className="mt-2 w-full rounded-lg bg-warden px-4 py-3 text-sm font-semibold text-ink transition hover:brightness-110 disabled:opacity-50">
-            {status === "paying" ? "Confirm in your wallet…" : `Pay ${token} on Base`}
+            {status === "paying" ? "Confirm in your wallet…" : belowMin ? `Enter at least $${minUsd}` : `Pay ${token} on Base`}
           </button>
         </>
       )}
@@ -146,7 +146,7 @@ export function CryptoCheckout({ planName, defaultAmountUsd }: { planName: strin
           <p className="mt-1 text-xs text-slate-500">Use it as <span className="text-slate-300">x-warden-agent-key</span> on /api/v1/check.</p>
         </div>
       )}
-      {status === "error" && <div className="mt-4 rounded-lg border border-block/30 bg-block/5 p-3 text-sm text-block">{error}</div>}
+      {error && <div className="mt-4 rounded-lg border border-block/30 bg-block/5 p-3 text-sm text-block">{error}</div>}
 
       <p className="mt-3 text-[11px] text-slate-600">
         Connects your wallet (MetaMask / Coinbase Wallet), switches to Base, and sends {token} directly. No custody, no card.
