@@ -16,7 +16,7 @@ export type Decision = "block" | "review" | "clear";
 export type SignalStatus = "ok" | "warn" | "fail" | "unknown";
 export type SignalCategory =
   | "honeypot" | "liquidity" | "holder_concentration" | "contract_risk"
-  | "approvals" | "sanctions" | "age_activity" | "metadata";
+  | "approvals" | "sanctions" | "age_activity" | "metadata" | "simulation";
 
 export interface SignalResult {
   category: SignalCategory;
@@ -31,7 +31,8 @@ export type ReasonCode =
   | "HONEYPOT_DETECTED" | "SELL_TAX_EXCESSIVE" | "LIQUIDITY_LOW" | "LIQUIDITY_UNLOCKED"
   | "OWNER_CAN_MINT" | "OWNER_CAN_BLACKLIST" | "PROXY_UPGRADEABLE"
   | "HOLDER_CONCENTRATION_HIGH" | "DANGEROUS_APPROVAL" | "SANCTIONED_ADDRESS"
-  | "CONTRACT_TOO_NEW" | "SOURCE_UNVERIFIED" | "SIGNAL_UNAVAILABLE";
+  | "CONTRACT_TOO_NEW" | "SOURCE_UNVERIFIED" | "SIGNAL_UNAVAILABLE"
+  | "TX_WILL_REVERT" | "CALL_TO_NON_CONTRACT" | "UNEXPECTED_ASSET_OUTFLOW";
 
 export interface Verdict {
   verdictId: string;
@@ -211,6 +212,90 @@ async function txContractRisk(counterparty: string): Promise<SignalResult> {
   return { category: "contract_risk", status, weight: 0.20, score, source: "token-risk", detail: reasonCodes.length ? "contract risk flags" : "contract clean", evidence: { reasonCodes } };
 }
 
+// ── pre-execution simulation (Base RPC) ───────────────────────────
+// Runs the tx through the node WITHOUT sending it: catches reverts, calls to a
+// codeless address, and — when an Alchemy RPC is configured — real asset moves.
+// Best-effort: degrades to "unknown" on RPC failure (never fabricates a pass).
+const SIM_RPC = process.env.SIM_RPC_URL || process.env.BASE_RPC_URL || "https://mainnet.base.org";
+const SIM_TIMEOUT_MS = Number(process.env.SIM_TIMEOUT_MS ?? 4000);
+
+async function simRpc(method: string, params: unknown[]): Promise<{ result?: unknown; error?: { message?: string } }> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), SIM_TIMEOUT_MS);
+  try {
+    const res = await fetch(SIM_RPC, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), cache: "no-store", signal: ctrl.signal,
+    });
+    return (await res.json()) as { result?: unknown; error?: { message?: string } };
+  } finally { clearTimeout(timer); }
+}
+
+async function simulateTx(input: { from: string; to: string; calldata?: string; value?: string }): Promise<SignalResult> {
+  const hasData = Boolean(input.calldata && input.calldata.length > 2 && input.calldata !== "0x");
+  const value = input.value && /^0x[0-9a-fA-F]+$/.test(input.value) ? input.value : "0x0";
+  const call = { from: input.from, to: input.to, data: input.calldata || "0x", value };
+  try {
+    const [codeRes, callRes] = await Promise.all([
+      simRpc("eth_getCode", [input.to, "latest"]),
+      simRpc("eth_call", [call, "latest"]),
+    ]);
+    // RPC itself unreachable → don't fabricate a verdict.
+    if (codeRes.error && callRes.error && /timeout|fetch|network/i.test(callRes.error.message ?? "")) {
+      return UNKNOWN("simulation", "sim-rpc", "simulation RPC unavailable");
+    }
+    const code = typeof codeRes.result === "string" ? codeRes.result : "0x";
+    const hasCode = code !== "0x" && code.length > 2;
+    const reasonCodes: ReasonCode[] = []; const notes: string[] = []; let score = 0; let status: SignalStatus = "ok";
+
+    // 1) calldata aimed at an address with no contract code — the call does nothing
+    //    on-chain (common in spoofed/typo'd targets and fake-approve phishing UIs).
+    if (hasData && !hasCode) {
+      status = "warn"; score = Math.max(score, 55); reasonCodes.push("CALL_TO_NON_CONTRACT");
+      notes.push("calldata targets an address with no contract code");
+    }
+    // 2) the exact tx reverts on simulation → it would fail on-chain (wasted gas,
+    //    frequently a malicious or malformed target).
+    if (callRes.error) {
+      status = status === "ok" ? "warn" : status; score = Math.max(score, 45); reasonCodes.push("TX_WILL_REVERT");
+      notes.push(`simulation reverted: ${String(callRes.error.message ?? "revert").slice(0, 80)}`);
+    }
+    // 3) real asset-diff (Alchemy-only) — flags value/token actually leaving `from`.
+    const changes = await simAssetChanges(call).catch(() => null);
+    if (changes && changes.outflow) {
+      // An outflow to something other than the intended `to`/counterparty is the
+      // classic drainer tell (approve-then-pull, delegatecall siphon).
+      if (changes.toUnexpected) {
+        status = "fail"; score = Math.max(score, 80); reasonCodes.push("UNEXPECTED_ASSET_OUTFLOW");
+        notes.push(`simulated outflow to an unexpected address (${changes.detail})`);
+      } else if (status === "ok") {
+        notes.push(`simulated outflow ${changes.detail}`);
+      }
+    }
+    return { category: "simulation", status, weight: 0.20, score, source: "sim-rpc",
+      detail: notes.join("; ") || "tx simulates cleanly (no revert)", evidence: { reasonCodes } };
+  } catch {
+    return UNKNOWN("simulation", "sim-rpc", "simulation unavailable");
+  }
+}
+
+/** Alchemy-only asset-change simulation. Returns null when not configured/unsupported. */
+async function simAssetChanges(call: { from: string; to: string; data: string; value: string }): Promise<{ outflow: boolean; toUnexpected: boolean; detail: string } | null> {
+  if (!/alchemy/i.test(SIM_RPC)) return null;
+  const res = await simRpc("alchemy_simulateAssetChanges", [{ from: call.from, to: call.to, value: call.value, data: call.data }]);
+  const changes = (res.result as { changes?: Array<Record<string, unknown>> } | undefined)?.changes;
+  if (!Array.isArray(changes)) return null;
+  const from = call.from.toLowerCase(), to = call.to.toLowerCase();
+  for (const c of changes) {
+    if (String(c.from ?? "").toLowerCase() !== from) continue; // only outflows FROM the payer
+    const recipient = String(c.to ?? "").toLowerCase();
+    const amt = String(c.rawAmount ?? c.amount ?? "");
+    const sym = String(c.symbol ?? c.assetType ?? "asset");
+    return { outflow: true, toUnexpected: recipient !== to && recipient !== "", detail: `${amt} ${sym} → ${recipient.slice(0, 10)}…` };
+  }
+  return { outflow: false, toUnexpected: false, detail: "" };
+}
+
 // ── karar motoru ──────────────────────────────────────────────────
 export function decide(signals: SignalResult[]) {
   const fails: ReasonCode[] = []; const warns: ReasonCode[] = [];
@@ -279,11 +364,12 @@ export async function guardTx(input: { from: string; to: string; calldata?: stri
   const started = Date.now();
   const dec = decodeCalldata(input.calldata);
   const counterparty = dec.spender ?? dec.recipient ?? input.to;
-  const [sanctions, contract] = await Promise.all([
+  const [sanctions, contract, simulation] = await Promise.all([
     bazaarGet("/api/x402/sanctions", { address: counterparty }).then((r) => sanctionsFrom(r, "counterparty")),
     txContractRisk(counterparty),
+    simulateTx({ from: input.from, to: input.to, calldata: input.calldata, value: input.value }),
   ]);
-  const signals = [approvalSignal(dec), { ...sanctions, weight: 0.10 }, contract];
+  const signals = [approvalSignal(dec), { ...sanctions, weight: 0.10 }, contract, simulation];
   return build(
     { type: "tx", chainId: input.chainId ?? 8453, from: input.from, to: input.to, calldata: input.calldata, value: input.value },
     signals, started,
