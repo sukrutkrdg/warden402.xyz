@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { guardToken, guardAddress, guardTx } from "../../lib/guard";
 import { clientIp, rateLimit } from "../../lib/rateLimit";
 import { recordToken, recordVerdict } from "../../lib/store";
+import { guardPayGate, type PayGate } from "../../lib/x402";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +18,12 @@ function limited(req: NextRequest): NextResponse | null {
   );
 }
 
+/** Apply x402 gate metadata (free-tier headers) + settle the payment on success. */
+async function finish(gate: PayGate & { ok: true }, res: NextResponse): Promise<NextResponse> {
+  if (gate.freeHeaders) Object.entries(gate.freeHeaders).forEach(([k, v]) => res.headers.set(k, v));
+  return gate.settle ? gate.settle(res) : res;
+}
+
 /**
  * Guard — SİTE İÇİNDE (in-process). Ayrı API host'una gerek yok.
  * GET  /api/guard?type=token|address&address=0x..
@@ -30,6 +37,7 @@ export async function GET(req: NextRequest) {
   if (!ADDR.test(address)) {
     return NextResponse.json({ error: "Geçerli bir EVM adresi gir (0x…40 hex)" }, { status: 400 });
   }
+  const gate = await guardPayGate(req); if (!gate.ok) return gate.res;
   try {
     const verdict = type === "address" ? await guardAddress(address, chainId) : await guardToken(address, chainId);
     void recordVerdict({ decision: verdict.decision, riskScore: verdict.riskScore, target: address });
@@ -42,7 +50,7 @@ export async function GET(req: NextRequest) {
     if (process.env.AUTO_ATTEST === "true" && verdict.decision === "block") {
       import("../../lib/eas").then((m) => m.attestVerdict({ target: address, decision: verdict.decision, riskScore: verdict.riskScore, reasons: verdict.reasons })).catch(() => {});
     }
-    return NextResponse.json(verdict);
+    return finish(gate, NextResponse.json(verdict));
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
   }
@@ -55,9 +63,10 @@ export async function POST(req: NextRequest) {
   if (!ADDR.test(from ?? "") || !ADDR.test(to ?? "")) {
     return NextResponse.json({ error: "from ve to geçerli EVM adresi olmalı" }, { status: 400 });
   }
+  const gate = await guardPayGate(req); if (!gate.ok) return gate.res;
   try {
     const verdict = await guardTx({ from, to, calldata, value, chainId });
-    return NextResponse.json(verdict);
+    return finish(gate, NextResponse.json(verdict));
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
   }
