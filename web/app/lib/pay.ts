@@ -17,14 +17,50 @@ interface Eip1193 {
   isMetaMask?: boolean;
   isCoinbaseWallet?: boolean;
 }
+// ── wallet discovery (EIP-6963 + legacy window.ethereum fallback) ──
+// Several wallet extensions can fight over window.ethereum; the one that
+// "wins" injection may have no account set up (users then see errors like
+// "wallet must has at least one account"). EIP-6963 lets every installed
+// wallet announce itself, so we can pick one that actually works.
+interface Announced { name: string; provider: Eip1193 }
+const announced: Announced[] = [];
+let selected: Eip1193 | null = null;
+let discoveryStarted = false;
+
+function discover(): void {
+  if (discoveryStarted || typeof window === "undefined") return;
+  discoveryStarted = true;
+  window.addEventListener("eip6963:announceProvider", (ev) => {
+    const d = (ev as CustomEvent<{ info?: { name?: string }; provider?: Eip1193 }>).detail;
+    if (d?.provider && !announced.some((a) => a.provider === d.provider)) {
+      announced.push({ name: d.info?.name ?? "Wallet", provider: d.provider });
+    }
+  });
+  window.dispatchEvent(new Event("eip6963:requestProvider")); // wallets reply synchronously
+}
+
+const rank = (p: Eip1193) => (p.isMetaMask ? 0 : p.isCoinbaseWallet ? 1 : 2);
+
+/** Every distinct provider we can reach, MetaMask/Coinbase preferred. */
+function candidates(): Eip1193[] {
+  discover();
+  const legacy = (globalThis as { ethereum?: Eip1193 }).ethereum;
+  const list: Eip1193[] = announced.map((a) => a.provider);
+  for (const p of legacy?.providers ?? []) if (!list.includes(p)) list.push(p);
+  if (legacy && !list.includes(legacy)) list.push(legacy);
+  return list.sort((a, b) => rank(a) - rank(b));
+}
+
 function provider(): Eip1193 {
-  let eth = (globalThis as { ethereum?: Eip1193 }).ethereum;
-  if (!eth) throw new Error("No wallet found. Install MetaMask or Coinbase Wallet, then reload.");
-  // Multiple injected wallets → pick a usable one.
-  if (Array.isArray(eth.providers) && eth.providers.length) {
-    eth = eth.providers.find((p) => p.isMetaMask) ?? eth.providers.find((p) => p.isCoinbaseWallet) ?? eth.providers[0]!;
-  }
-  return eth;
+  if (selected) return selected;
+  const c = candidates();
+  if (!c.length) throw new Error("No wallet found. Install MetaMask or Coinbase Wallet, then reload.");
+  return c[0]!;
+}
+
+/** Route a raw EIP-1193 request through the connected wallet (same provider connect() picked). */
+export async function walletRequest<T = unknown>(args: { method: string; params?: unknown[] }): Promise<T> {
+  return (await provider().request(args)) as T;
 }
 
 function pad32(hexNo0x: string): string {
@@ -37,18 +73,28 @@ function encodeTransfer(to: string, amount: bigint): string {
 }
 
 export async function connect(): Promise<string> {
-  const eth = provider();
-  let accs: string[] = [];
-  try {
-    accs = ((await eth.request({ method: "eth_requestAccounts" })) as string[]) ?? [];
-  } catch (e) {
-    const err = e as { code?: number; message?: string };
-    if (err?.code === 4001) throw new Error("Connection request rejected in wallet.");
-    throw new Error(err?.message || "Could not open the wallet. Unlock it and try again.");
+  const list = candidates();
+  if (!list.length) throw new Error("No wallet found. Install MetaMask or Coinbase Wallet, then reload.");
+
+  // 1) a wallet that is already authorized wins silently (no popup)
+  for (const p of list) {
+    const accs = ((await p.request({ method: "eth_accounts" }).catch(() => [])) as string[]) ?? [];
+    if (accs.length) { selected = p; return accs[0]!; }
   }
-  if (!accs.length) accs = ((await eth.request({ method: "eth_accounts" })) as string[]) ?? [];
-  if (!accs.length) throw new Error("Your wallet has no account. Unlock it or create/import an account, then retry.");
-  return accs[0]!;
+  // 2) otherwise ask each in turn; a wallet with no usable account fails fast
+  //    (no popup), so we fall through to the next one instead of dead-ending.
+  let lastErr = "";
+  for (const p of list) {
+    try {
+      const accs = ((await p.request({ method: "eth_requestAccounts" })) as string[]) ?? [];
+      if (accs.length) { selected = p; return accs[0]!; }
+    } catch (e) {
+      const err = e as { code?: number; message?: string };
+      if (err?.code === 4001) throw new Error("Connection request rejected in wallet.");
+      lastErr = err?.message || lastErr;
+    }
+  }
+  throw new Error(lastErr ? `${lastErr} — unlock a wallet that has an account, then retry.` : "No wallet with an account found. Unlock your wallet or create an account, then retry.");
 }
 
 export async function ensureBase(): Promise<void> {

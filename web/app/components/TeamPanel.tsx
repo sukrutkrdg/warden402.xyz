@@ -1,15 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { connect as connectWallet, pay } from "../lib/pay";
+import { connect as connectWallet, pay, walletRequest } from "../lib/pay";
 
 interface Org { orgId: string; name: string; ownerAddr: string; plan: string; planExpiresAt?: string }
 interface Member { addr: string; role: "owner" | "admin" | "member" }
 interface OrgAgent { key: string; agentId: string; plan: string; paused: boolean; checksUsed?: number; monthlyCap?: number }
 
 const ROLE_BADGE: Record<string, string> = { owner: "text-warden", admin: "text-clear", member: "text-slate-400" };
-
-function eth(): any { return typeof window !== "undefined" ? (window as any).ethereum : undefined; }
 
 export function TeamPanel() {
   const [address, setAddress] = useState("");
@@ -44,20 +42,18 @@ export function TeamPanel() {
 
   async function connect() {
     setErr("");
-    const e = eth();
-    if (!e) { setErr("No wallet found. Install MetaMask or Coinbase Wallet."); return; }
     try {
-      const accts = await e.request({ method: "eth_requestAccounts" });
-      if (accts?.[0]) setAddress(accts[0]);
+      // Shared wallet layer: EIP-6963 discovery + skips extensions without an account.
+      const a = await connectWallet();
+      if (a) setAddress(a);
     } catch (x: any) { setErr(x?.message ?? "Wallet connection rejected."); }
   }
 
   async function signIn() {
     setErr(""); setBusy("signin");
     try {
-      const e = eth();
       const { message } = await fetch(`/api/auth/nonce?address=${address}`).then((r) => r.json());
-      const signature = await e.request({ method: "personal_sign", params: [message, address] });
+      const signature = await walletRequest<string>({ method: "personal_sign", params: [message, address] });
       const r = await fetch("/api/auth/verify", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ address, message, signature }) }).then((x) => x.json());
       if (r?.token) { localStorage.setItem("warden_session", r.token); localStorage.setItem("warden_addr", r.address); setToken(r.token); setAddress(r.address); }
       else setErr(r?.error ?? "Sign-in failed.");
