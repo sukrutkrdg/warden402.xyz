@@ -82,7 +82,10 @@ export function TeamPanel() {
   async function createAgent() {
     if (!sel) return;
     const r = await authFetch("/api/org/agents", { method: "POST", body: JSON.stringify({ orgId: sel.orgId }) }).then((x) => x.json());
-    if (r?.key) { setNewKey(r.key); openOrg(sel); } else setErr(r?.error ?? "Could not create agent.");
+    if (r?.key) {
+      await openOrg(sel); // refresh first — openOrg clears newKey, so set it after
+      setNewKey(r.key);
+    } else setErr(r?.error ?? "Could not create agent.");
   }
   async function payOrg(amountUsd: number) {
     if (!sel) return;
