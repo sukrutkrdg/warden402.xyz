@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { PAY_TO, connect, explorerTx, pay, type PayToken } from "../lib/pay";
+import { PAY_TO, connect, explorerTx, pay, signClaim, type PayToken } from "../lib/pay";
 
 export function CryptoCheckout({ planName, defaultAmountUsd }: { planName: string; defaultAmountUsd: number }) {
   const [token, setToken] = useState<PayToken>("USDC");
@@ -51,9 +51,12 @@ export function CryptoCheckout({ planName, defaultAmountUsd }: { planName: strin
       }
       if (!ok) setUnconfirmed(true);
       else {
-        // Redeem the payment → issue an agent key with plan quota + expiry.
-        const s = await fetch("/api/subscribe", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ txHash: hash }) }).then((r) => r.json()).catch(() => null);
+        // Prove ownership of the paying wallet, then redeem → issue an agent key.
+        const from = account || (await connect());
+        const signature = await signClaim(hash, from);
+        const s = await fetch("/api/subscribe", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ txHash: hash, signature }) }).then((r) => r.json()).catch(() => null);
         if (s?.key) setSub({ key: s.key, plan: s.plan, expiresAt: s.expiresAt });
+        else if (s?.error) setError(s.detail || s.error);
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : (e as { message?: string })?.message ?? String(e);

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { verifyMessage } from "viem";
 import { createAgent } from "../../lib/firewallKv";
+import { claimMessage } from "../../lib/pay";
 import { PERSISTENT, kvPipeline } from "../../lib/store";
 
 export const dynamic = "force-dynamic";
@@ -16,11 +18,21 @@ const TEAM_MIN = Number(process.env.PLAN_TEAM_MIN ?? 150);
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const hash = String(body?.txHash ?? "").trim();
+  const signature = String(body?.signature ?? "").trim();
   if (!/^0x[a-fA-F0-9]{64}$/.test(hash)) return NextResponse.json({ error: "invalid_hash" }, { status: 400 });
+  if (!/^0x[a-fA-F0-9]{130,}$/.test(signature)) return NextResponse.json({ error: "missing_signature", detail: "Sign the claim message with the paying wallet." }, { status: 400 });
 
   // 1) verify the payment on-chain
   const v = await fetch(new URL(`/api/verify-payment?hash=${hash}`, req.nextUrl.origin), { cache: "no-store" }).then((r) => r.json()).catch(() => null);
   if (!v?.verified) return NextResponse.json({ error: "payment_not_verified", detail: v?.error ?? "not confirmed" }, { status: 400 });
+
+  // 1b) OWNERSHIP: the claim must be signed by the on-chain payer (tx `from`).
+  // Blocks a third party from redeeming someone else's public payment tx.
+  const payer = String(v.from ?? "").toLowerCase();
+  const ownsPayment = /^0x[a-fA-F0-9]{40}$/.test(payer) && await verifyMessage({
+    address: payer as `0x${string}`, message: claimMessage(hash), signature: signature as `0x${string}`,
+  }).catch(() => false);
+  if (!ownsPayment) return NextResponse.json({ error: "not_payment_owner", detail: "Signature does not match the paying wallet." }, { status: 403 });
 
   // 2) compute USD value (USDC ~1:1; ETH via live price)
   let usd = 0;

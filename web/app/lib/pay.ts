@@ -113,4 +113,26 @@ export async function pay(token: PayToken, amountUsd: number, ethPriceUsd?: numb
   return hash;
 }
 
+/**
+ * Canonical message a payer signs to PROVE they own the paying wallet, binding
+ * a specific tx hash to the redemption. The server recovers the signer and
+ * requires it to equal the on-chain payer (tx `from`) — this stops a third
+ * party from redeeming someone else's public payment tx.
+ * Pure string builder: safe to import on both client and server.
+ */
+export function claimMessage(txHash: string): string {
+  return [
+    "warden402.xyz — subscription payment claim",
+    `Tx: ${txHash.toLowerCase()}`,
+    `Chain: ${BASE_CHAIN_ID}`,
+    "By signing you prove ownership of the paying wallet. No transaction is sent.",
+  ].join("\n");
+}
+
+/** Ask the connected wallet to sign the claim message for `txHash`. */
+export async function signClaim(txHash: string, from: string): Promise<string> {
+  const eth = provider();
+  return (await eth.request({ method: "personal_sign", params: [claimMessage(txHash), from] })) as string;
+}
+
 export const explorerTx = (hash: string) => `https://basescan.org/tx/${hash}`;

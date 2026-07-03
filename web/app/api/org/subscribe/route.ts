@@ -22,6 +22,13 @@ export async function POST(req: NextRequest) {
   const v = await fetch(new URL(`/api/verify-payment?hash=${hash}`, req.nextUrl.origin), { cache: "no-store" }).then((r) => r.json()).catch(() => null);
   if (!v?.verified) return NextResponse.json({ error: "payment_not_verified", detail: v?.error ?? "not confirmed" }, { status: 400 });
 
+  // 1b) OWNERSHIP: the on-chain payer must be the authenticated (SIWE) wallet.
+  // The session already proves control of `addr`, so no extra signature is needed —
+  // this just stops an owner from redeeming a payment made by someone else.
+  if (String(v.from ?? "").toLowerCase() !== addr.toLowerCase()) {
+    return NextResponse.json({ error: "not_payment_owner", detail: "Pay from the wallet you signed in with." }, { status: 403 });
+  }
+
   // 2) USD value
   let usd = 0;
   if (v.token === "USDC") usd = Number(v.amount);
