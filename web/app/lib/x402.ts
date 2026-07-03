@@ -20,6 +20,7 @@ import {
   x402ResourceServer,
 } from "@x402/core/server";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
+import { bazaarResourceServerExtension, declareDiscoveryExtension } from "@x402/extensions/bazaar";
 import { createFacilitatorConfig } from "@coinbase/x402";
 import { PERSISTENT, kvPipeline } from "./store";
 import { clientIp } from "./rateLimit";
@@ -85,10 +86,52 @@ function getHttpServer(cfg: PayConfig): x402HTTPResourceServer {
   if (httpServer) return httpServer;
   const facilitator = new HTTPFacilitatorClient(createFacilitatorConfig(cfg.cdpApiKeyId!, cfg.cdpApiKeySecret!));
   const server = new x402ResourceServer(facilitator).register(NETWORK, new ExactEvmScheme());
-  const accepts = (price: string) => ({ accepts: { scheme: "exact" as const, price, network: NETWORK, payTo: cfg.payTo } });
+  // Bazaar discovery: routes below carry machine-readable metadata so the CDP
+  // facilitator can index this API in the x402 Bazaar catalog for agents.
+  server.registerExtension(bazaarResourceServerExtension);
+  const accepts = (price: string) => ({ scheme: "exact" as const, price, network: NETWORK, payTo: cfg.payTo });
   httpServer = new x402HTTPResourceServer(server, {
-    "GET /api/guard": accepts(cfg.priceGet),
-    "POST /api/guard": accepts(cfg.pricePost),
+    "GET /api/guard": {
+      accepts: accepts(cfg.priceGet),
+      serviceName: "Warden",
+      description: "Pre-execution security verdict for a token or address on Base: block/review/clear + risk score + reason codes (honeypot, liquidity, holder concentration, contract risk, sanctions).",
+      mimeType: "application/json",
+      tags: ["security", "risk", "base", "defi", "agents"],
+      extensions: declareDiscoveryExtension({
+        input: { type: "token", address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", chainId: "8453" },
+        inputSchema: {
+          properties: {
+            type: { type: "string", enum: ["token", "address"], description: "What to analyze" },
+            address: { type: "string", description: "EVM address (0x + 40 hex)" },
+            chainId: { type: "string", description: "Chain id, default 8453 (Base)" },
+          },
+          required: ["address"],
+        },
+        output: { example: { decision: "clear", riskScore: 0, confidence: 1, reasons: [], summary: "No risk signals detected.", degraded: false } },
+      }),
+    },
+    "POST /api/guard": {
+      accepts: accepts(cfg.pricePost),
+      serviceName: "Warden",
+      description: "Pre-execution transaction check on Base: decodes calldata (unlimited approvals, Permit2/permit drainer vectors), simulates the tx (revert / non-contract target / unexpected asset outflow) and returns block/review/clear before you sign.",
+      mimeType: "application/json",
+      tags: ["security", "transaction", "simulation", "base", "agents"],
+      extensions: declareDiscoveryExtension({
+        bodyType: "json",
+        input: { from: "0x973a31858f4d2125f48c880542da11a2796f12d6", to: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", calldata: "0x095ea7b3…", value: "0x0", chainId: 8453 },
+        inputSchema: {
+          properties: {
+            from: { type: "string", description: "Sender address" },
+            to: { type: "string", description: "Target contract/address" },
+            calldata: { type: "string", description: "Hex calldata (optional)" },
+            value: { type: "string", description: "Hex wei value (optional)" },
+            chainId: { type: "number", description: "Default 8453 (Base)" },
+          },
+          required: ["from", "to"],
+        },
+        output: { example: { decision: "review", riskScore: 45, reasons: ["DANGEROUS_APPROVAL"], summary: "Unlimited ERC-20 approval detected.", degraded: false } },
+      }),
+    },
   });
   return httpServer;
 }

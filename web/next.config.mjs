@@ -23,6 +23,7 @@ const nextConfig = {
       // Agent / AI discovery.
       { source: "/llms.txt", destination: "/api/llms" },
       { source: "/.well-known/mcp.json", destination: "/api/well-known-mcp" },
+      { source: "/.well-known/x402", destination: "/api/well-known-x402" },
     ];
   },
 };
