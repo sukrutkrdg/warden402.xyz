@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { signSession, verifyLogin } from "../../../lib/auth";
+import { SESSION_SECURE, signSession, verifyLogin } from "../../../lib/auth";
 
 export const dynamic = "force-dynamic";
 
 // POST /api/auth/verify  { address, message, signature } → { token, address }
 export async function POST(req: NextRequest) {
+  if (!SESSION_SECURE) return NextResponse.json({ error: "not_configured", detail: "Server missing SESSION_SECRET — team sign-in is disabled." }, { status: 503 });
   const body = await req.json().catch(() => ({}));
   const { address, message, signature } = body ?? {};
   if (!address || !message || !signature) return NextResponse.json({ error: "missing_fields" }, { status: 400 });

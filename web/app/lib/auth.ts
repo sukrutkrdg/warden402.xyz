@@ -8,18 +8,25 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { verifyMessage } from "viem";
 import { PERSISTENT, kvPipeline } from "./store";
 
-const SECRET = process.env.SESSION_SECRET ?? "dev-insecure-change-me";
+const DEFAULT_SECRET = "dev-insecure-change-me";
+const SECRET = process.env.SESSION_SECRET ?? DEFAULT_SECRET;
+/** In production, a default/blank secret means sessions are forgeable → fail
+ *  closed: refuse to mint or accept sessions until SESSION_SECRET is set. */
+const IS_PROD = process.env.VERCEL_ENV === "production" || process.env.NODE_ENV === "production";
+export const SESSION_SECURE = !(IS_PROD && (SECRET === DEFAULT_SECRET || SECRET.length < 16));
 const mem = (globalThis as unknown as { __wardenNonce?: Map<string, number> }).__wardenNonce ?? ((globalThis as unknown as { __wardenNonce?: Map<string, number> }).__wardenNonce = new Map());
 
 const b64u = (s: string | Buffer) => Buffer.from(s).toString("base64url");
 
 // ── sessions ──────────────────────────────────────────────────────
 export function signSession(addr: string, days = 30): string {
+  if (!SESSION_SECURE) throw new Error("SESSION_SECRET not set — refusing to mint a forgeable session.");
   const payload = b64u(JSON.stringify({ addr: addr.toLowerCase(), exp: Date.now() + days * 86_400_000 }));
   const sig = createHmac("sha256", SECRET).update(payload).digest("base64url");
   return `${payload}.${sig}`;
 }
 export function verifySession(token?: string | null): string | null {
+  if (!SESSION_SECURE) return null; // fail closed: never accept sessions signed with an insecure secret
   if (!token || !token.includes(".")) return null;
   const [payload, sig] = token.split(".");
   if (!payload || !sig) return null;
