@@ -5,8 +5,10 @@ import { PERSISTENT, kvPipeline } from "../../../lib/store";
 
 export const dynamic = "force-dynamic";
 
-const STARTER_MIN = Number(process.env.PLAN_STARTER_MIN ?? 40);
-const TEAM_MIN = Number(process.env.PLAN_TEAM_MIN ?? 150);
+// Minimums MUST track the sticker prices (/pricing: Starter $49, Team $299).
+// Epsilon absorbs rounding only — never a cross-tier gap (pay-floor-get-top-tier).
+const STARTER_MIN = Number(process.env.PLAN_STARTER_MIN ?? 47);
+const TEAM_MIN = Number(process.env.PLAN_TEAM_MIN ?? 295);
 
 // POST /api/org/subscribe  { orgId, txHash }  → verify crypto payment, upgrade/renew the org (owner only)
 export async function POST(req: NextRequest) {

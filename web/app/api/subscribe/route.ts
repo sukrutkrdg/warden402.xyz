@@ -6,8 +6,11 @@ import { PERSISTENT, kvPipeline } from "../../lib/store";
 
 export const dynamic = "force-dynamic";
 
-const STARTER_MIN = Number(process.env.PLAN_STARTER_MIN ?? 40);
-const TEAM_MIN = Number(process.env.PLAN_TEAM_MIN ?? 150);
+// Minimums MUST track the sticker prices (/pricing: Starter $49, Team $299).
+// A small negative epsilon absorbs price rounding only — never a cross-tier gap,
+// or a buyer could pay the Starter floor and be handed the Team tier.
+const STARTER_MIN = Number(process.env.PLAN_STARTER_MIN ?? 47);
+const TEAM_MIN = Number(process.env.PLAN_TEAM_MIN ?? 295);
 
 /**
  * POST /api/subscribe  { txHash }
@@ -60,7 +63,10 @@ export async function POST(req: NextRequest) {
   // 5) issue the agent key
   const plan: "starter" | "team" = usd >= TEAM_MIN ? "team" : "starter";
   const expiresAt = new Date(Date.now() + 30 * 86_400_000).toISOString();
-  const agentId = `sub_${(v.from ?? "").slice(2, 10)}_${Math.random().toString(36).slice(2, 6)}`;
+  // Unguessable agentId: the payer is public on-chain, so the random suffix must
+  // carry the entropy (state isolation depends on it not being guessable).
+  const rand = Array.from(crypto.getRandomValues(new Uint8Array(9))).map((b) => b.toString(16).padStart(2, "0")).join("");
+  const agentId = `sub_${(v.from ?? "").slice(2, 8)}_${rand}`;
   const { key, record } = await createAgent(agentId, {}, { plan, expiresAt, payer: v.from, txHash: hash });
 
   // 6) lookup + revenue log

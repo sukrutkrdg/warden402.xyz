@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sessionAddr } from "../../../lib/auth";
-import { canManageAgents, getOrg, getRole, linkAgent, listOrgAgentKeys } from "../../../lib/org";
+import { canManageAgents, effectivePlan, getOrg, getRole, linkAgent, listOrgAgentKeys } from "../../../lib/org";
 import { createAgent, getAgent, getUsage, type AgentRecord } from "../../../lib/firewallKv";
 
 export const dynamic = "force-dynamic";
@@ -35,16 +35,22 @@ export async function POST(req: NextRequest) {
   const org = await getOrg(orgId);
   if (!org) return NextResponse.json({ error: "no_org" }, { status: 404 });
 
+  // Use the EFFECTIVE plan: a lapsed paid plan reverts to free, so an expired
+  // org can't keep minting paid-tier agents.
+  const plan = effectivePlan(org);
+
   // Enforce the plan's agent count (mirrors /pricing: free 1, starter 2, team 10).
   const AGENT_LIMITS: Record<string, number> = { free: 1, starter: 2, team: 10, enterprise: 100 };
-  const limit = AGENT_LIMITS[org.plan] ?? 1;
+  const limit = AGENT_LIMITS[plan] ?? 1;
   const existing = await listOrgAgentKeys(orgId);
   if (existing.length >= limit) {
-    return NextResponse.json({ error: "agent_limit", detail: `The ${org.plan} plan allows ${limit} agent${limit === 1 ? "" : "s"}. Upgrade to add more.` }, { status: 403 });
+    return NextResponse.json({ error: "agent_limit", detail: `The ${plan} plan allows ${limit} agent${limit === 1 ? "" : "s"}. Upgrade to add more.` }, { status: 403 });
   }
 
+  // Bind the org's subscription expiry to the agent so per-check entitlement
+  // (PLAN_EXPIRED) fires once the plan lapses.
   const agentId = `${orgId}_${String(body?.label ?? "agent").replace(/[^a-z0-9]/gi, "").slice(0, 12) || "agent"}_${Math.random().toString(36).slice(2, 6)}`;
-  const { key, record } = await createAgent(agentId, {}, { plan: (org.plan as AgentRecord["plan"]) || "free" });
+  const { key, record } = await createAgent(agentId, {}, { plan: (plan as AgentRecord["plan"]) || "free", expiresAt: org.planExpiresAt });
   await linkAgent(orgId, key);
   return NextResponse.json({ key, agentId: record.agentId, plan: record.plan, monthlyCap: record.monthlyCap });
 }

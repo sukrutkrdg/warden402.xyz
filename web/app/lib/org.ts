@@ -18,6 +18,15 @@ export const canManageBilling = (r: Role | null) => r === "owner";
 
 export interface Org { orgId: string; name: string; ownerAddr: string; plan: string; createdAt: string; planExpiresAt?: string }
 
+/** The plan actually in effect right now: a lapsed paid plan reverts to free.
+ *  Callers MUST use this (not org.plan) for entitlements, or a single 30-day
+ *  payment would grant the paid tier forever. */
+export function effectivePlan(org: Org): string {
+  if (org.plan === "free") return "free";
+  if (org.planExpiresAt && Date.now() > new Date(org.planExpiresAt).getTime()) return "free";
+  return org.plan;
+}
+
 const g = globalThis as unknown as { __wardenOrg?: { orgs: Map<string, string>; members: Map<string, Record<string, string>>; userOrgs: Map<string, Set<string>>; agents: Map<string, Set<string>> } };
 const mem = g.__wardenOrg ?? (g.__wardenOrg = { orgs: new Map(), members: new Map(), userOrgs: new Map(), agents: new Map() });
 

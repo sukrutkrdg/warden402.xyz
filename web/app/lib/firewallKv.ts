@@ -44,7 +44,19 @@ export async function createAgent(
     plan, monthlyCap: PLAN_CAP[plan], expiresAt: opts.expiresAt, payer: opts.payer, txHash: opts.txHash,
   };
   const val = JSON.stringify(record);
-  if (PERSISTENT) { try { await kvPipeline([["SET", `fw:agent:${key}`, val], ["SADD", "fw:index", key]]); return { key, record }; } catch { /* fall */ } }
+  if (PERSISTENT) {
+    try {
+      // Defense-in-depth: reject a state-namespace collision. State is keyed by
+      // agentId, so a duplicate would silently share budgets/audit/holds.
+      const [claimed] = await kvPipeline([["SET", `fw:agentid:${agentId}`, key, "NX"]]);
+      if (claimed === null || claimed === undefined) throw new Error("agentId_collision");
+      await kvPipeline([["SET", `fw:agent:${key}`, val], ["SADD", "fw:index", key]]);
+      return { key, record };
+    } catch (e) {
+      if (e instanceof Error && e.message === "agentId_collision") throw e;
+      /* KV unreachable → fall through to memory */
+    }
+  }
   mem.agents.set(key, val);
   return { key, record };
 }
@@ -146,25 +158,59 @@ function medianOf(arr: number[]): number | undefined {
 }
 
 // ── webhooks (notify on hold) ──────────────────────────────────────
-function safeWebhookUrl(u: string): boolean {
+/** True if an IP string is private / loopback / link-local / ULA / reserved. */
+function isPrivateIp(ip: string): boolean {
+  const a = ip.toLowerCase();
+  // IPv6
+  if (a.includes(":")) {
+    if (a === "::1" || a === "::") return true;                 // loopback / unspecified
+    if (a.startsWith("fe80") || a.startsWith("fc") || a.startsWith("fd")) return true; // link-local + ULA
+    const m = a.match(/(\d+\.\d+\.\d+\.\d+)$/);                 // IPv4-mapped (::ffff:127.0.0.1)
+    if (m) return isPrivateIp(m[1]!);
+    return false;
+  }
+  const p = a.split(".").map(Number);
+  if (p.length !== 4 || p.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return true; // malformed → reject
+  const [x, y] = p as [number, number, number, number];
+  return x === 0 || x === 10 || x === 127 || (x === 169 && y === 254) || (x === 172 && y >= 16 && y <= 31) || (x === 192 && y === 168) || x >= 224;
+}
+
+/** Lexical pre-check: only real DNS hostnames or plain public dotted-quad IPv4.
+ *  Rejects IPv6 literals, and decimal/hex/octal IP encodings that bypass filters. */
+function lexicallySafeHost(hostname: string): boolean {
+  const h = hostname.toLowerCase().replace(/\.$/, "");
+  if (!h || h === "localhost" || h.endsWith(".local") || h.endsWith(".internal")) return false;
+  if (h.includes(":") || h.startsWith("[")) return false;      // IPv6 literal — reject outright
+  if (/^\d+$/.test(h) || /^0x/i.test(h)) return false;         // decimal/hex integer IP (2130706433, 0x7f000001)
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(h)) return !isPrivateIp(h);  // literal IPv4 → must be public
+  if (/^\d/.test(h) && /\.\d+$/.test(h) === false) { /* falls through */ }
+  return /^[a-z0-9.-]+\.[a-z]{2,}$/.test(h);                   // require a real dotted DNS name
+}
+
+/** Full validation incl. DNS resolution (blocks rebinding to internal IPs).
+ *  Best-effort resolve; if DNS is unavailable we keep the lexical guard. */
+async function safeWebhookUrl(u: string): Promise<boolean> {
+  let url: URL;
+  try { url = new URL(u); } catch { return false; }
+  if (url.protocol !== "https:" && url.protocol !== "http:") return false;
+  if (!lexicallySafeHost(url.hostname)) return false;
+  // Resolve the hostname and reject if ANY resolved address is internal.
   try {
-    const url = new URL(u);
-    if (url.protocol !== "https:" && url.protocol !== "http:") return false;
-    const h = url.hostname.toLowerCase();
-    if (h === "localhost" || h.endsWith(".local")) return false;
-    if (/^(127\.|10\.|192\.168\.|169\.254\.|0\.)/.test(h)) return false;
-    if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(h)) return false;
-    return true;
-  } catch { return false; }
+    const dns = await import("node:dns/promises");
+    const addrs = await dns.lookup(url.hostname, { all: true });
+    if (!addrs.length) return false;
+    if (addrs.some((r) => isPrivateIp(r.address))) return false;
+  } catch { /* dns unavailable (e.g. edge) → rely on the lexical guard above */ }
+  return true;
 }
 async function notifyWebhook(url: string, payload: unknown) {
-  if (!safeWebhookUrl(url)) return;
+  if (!(await safeWebhookUrl(url))) return;
   const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 4000);
-  try { await fetch(url, { method: "POST", headers: { "content-type": "application/json", "user-agent": "warden-webhook" }, body: JSON.stringify(payload), signal: ctrl.signal }); } catch { /* fire-and-forget */ } finally { clearTimeout(t); }
+  try { await fetch(url, { method: "POST", headers: { "content-type": "application/json", "user-agent": "warden-webhook" }, body: JSON.stringify(payload), signal: ctrl.signal, redirect: "manual" }); } catch { /* fire-and-forget */ } finally { clearTimeout(t); }
 }
 export async function setWebhook(key: string, url: string | null): Promise<{ ok: boolean; error?: string }> {
   const rec = await getAgent(key); if (!rec) return { ok: false, error: "unknown_agent" };
-  if (url && !safeWebhookUrl(url)) return { ok: false, error: "invalid_url" };
+  if (url && !(await safeWebhookUrl(url))) return { ok: false, error: "invalid_url" };
   rec.webhookUrl = url ?? undefined;
   await saveAgent(key, rec);
   return { ok: true };
@@ -187,13 +233,15 @@ async function seen(id: string, addr: string): Promise<boolean> {
 async function reserveSpend(id: string, amount: number): Promise<{ hour: number; day: number }> {
   const h = hourEpoch(), d = dayEpoch();
   if (PERSISTENT) {
-    try {
-      const res = await kvPipeline([
-        ["INCRBYFLOAT", `fw:spend:${id}:h:${h}`, amount], ["EXPIRE", `fw:spend:${id}:h:${h}`, 3600],
-        ["INCRBYFLOAT", `fw:spend:${id}:d:${d}`, amount], ["EXPIRE", `fw:spend:${id}:d:${d}`, 86400],
-      ]);
-      return { hour: Number(res[0] ?? 0), day: Number(res[2] ?? 0) };
-    } catch { /* fall */ }
+    // FAIL CLOSED: this gates real money. If the authoritative KV write fails we
+    // must NOT fall back to per-instance memory (which reads a zeroed budget and
+    // would approve unlimited overspend across instances) — throw so the caller
+    // denies the spend.
+    const res = await kvPipeline([
+      ["INCRBYFLOAT", `fw:spend:${id}:h:${h}`, amount], ["EXPIRE", `fw:spend:${id}:h:${h}`, 3600],
+      ["INCRBYFLOAT", `fw:spend:${id}:d:${d}`, amount], ["EXPIRE", `fw:spend:${id}:d:${d}`, 86400],
+    ]);
+    return { hour: Number(res[0] ?? 0), day: Number(res[2] ?? 0) };
   }
   const bump = (k: string, by: number) => { const n = Number(mem.kv.get(k) ?? 0) + by; mem.kv.set(k, String(n)); return n; };
   return { hour: bump(`fw:spend:${id}:h:${h}`, amount), day: bump(`fw:spend:${id}:d:${d}`, amount) };
@@ -278,11 +326,16 @@ export async function checkKv(record: AgentRecord, action: FirewallAction): Prom
   // read-then-check-then-commit sequence leaves open.
   let final = outcome;
   if (outcome.commit && amount > 0) {
-    const tot = await reserveSpend(id, amount);
-    if (tot.hour > p.maxPerHourUsd || tot.day > p.maxPerDayUsd) {
-      await reserveSpend(id, -amount); // roll back
-      const reason = tot.hour > p.maxPerHourUsd ? "OVER_HOURLY" : "OVER_DAILY";
-      final = { decision: "deny", reasons: [reason], detail: `Would exceed ${reason === "OVER_HOURLY" ? "hourly" : "daily"} cap (concurrent).`, commit: false };
+    try {
+      const tot = await reserveSpend(id, amount);
+      if (tot.hour > p.maxPerHourUsd || tot.day > p.maxPerDayUsd) {
+        await reserveSpend(id, -amount).catch(() => {}); // best-effort roll back
+        const reason = tot.hour > p.maxPerHourUsd ? "OVER_HOURLY" : "OVER_DAILY";
+        final = { decision: "deny", reasons: [reason], detail: `Would exceed ${reason === "OVER_HOURLY" ? "hourly" : "daily"} cap (concurrent).`, commit: false };
+      }
+    } catch {
+      // Budget store unavailable → fail closed rather than approve an untracked spend.
+      final = { decision: "deny", reasons: ["BUDGET_UNAVAILABLE"], detail: "Budget store unavailable — spend denied to protect your cap. Retry shortly.", commit: false };
     }
   }
   if (final.commit) await commitMeta(id, action.to, amount, isApproval);
@@ -327,9 +380,19 @@ export async function resolveHold(id: string, holdId: string, approve: boolean):
   const holds = await listHolds(id, false);
   const h = holds.find((x) => x.holdId === holdId);
   if (!h || h.status !== "pending") return { ok: false, error: "not_found_or_resolved" };
+
+  // Atomic single-resolution claim: two concurrent approves would otherwise both
+  // see `pending` and each reserve the spend (double-count against the budget).
+  if (PERSISTENT) {
+    try {
+      const [won] = await kvPipeline([["SET", `fw:holddone:${id}:${holdId}`, approve ? "a" : "r", "NX", "EX", 604800]]);
+      if (won === null || won === undefined) return { ok: false, error: "not_found_or_resolved" };
+    } catch { return { ok: false, error: "store_unavailable" }; }
+  }
   if (approve) {
     // Manual approval intentionally overrides the hold; record the spend.
-    if ((h.amountUsd ?? 0) > 0) await reserveSpend(id, h.amountUsd);
+    try { if ((h.amountUsd ?? 0) > 0) await reserveSpend(id, h.amountUsd); }
+    catch { return { ok: false, error: "store_unavailable" }; } // don't approve if we can't record the spend
     await commitMeta(id, h.action.to, h.amountUsd ?? 0, h.action.kind === "tx");
     h.status = "approved";
   } else {
