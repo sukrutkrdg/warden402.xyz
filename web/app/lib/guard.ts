@@ -55,7 +55,10 @@ export interface Verdict {
 const BLOCK_THRESHOLD = Number(process.env.WARDEN_BLOCK_THRESHOLD ?? 70);
 const REVIEW_THRESHOLD = Number(process.env.WARDEN_REVIEW_THRESHOLD ?? 35);
 const HARD_BLOCK: SignalCategory[] = ["honeypot", "sanctions"];
-const CRITICAL_FOR_DEGRADE: SignalCategory[] = ["honeypot", "contract_risk", "liquidity", "sanctions"];
+// A tx must not `clear` when we couldn't decode its calldata or run the
+// simulation — both degrade to review. (These categories only exist on the tx
+// path, so token verdicts are unaffected.)
+const CRITICAL_FOR_DEGRADE: SignalCategory[] = ["honeypot", "contract_risk", "liquidity", "sanctions", "approvals", "simulation"];
 
 // ── bazaar client ─────────────────────────────────────────────────
 const BASE_URL = process.env.BAZAAR_BASE_URL ?? "https://402.com.tr";
@@ -115,7 +118,10 @@ const UNKNOWN = (category: SignalCategory, source: string, detail: string): Sign
 // ── token sinyalleri (token-risk → 3, pools → 1, sanctions → 1) ───
 function honeypotFromRisk(p?: Record<string, unknown>): SignalResult {
   const sec = rec(p?.security);
-  if (!sec) return UNKNOWN("honeypot", "token-risk", "security yok");
+  // An empty {security:{}} (common for a brand-new token with no record) must
+  // NOT read as safe — require at least one recognized field, else degrade.
+  const KNOWN = ["isHoneypot", "sellTaxPct", "buyTaxPct"];
+  if (!sec || !KNOWN.some((k) => sec[k] !== undefined)) return UNKNOWN("honeypot", "token-risk", "no honeypot data");
   const isHoneypot = sec.isHoneypot === true;
   const sellTax = num(sec.sellTaxPct) ?? 0, buyTax = num(sec.buyTaxPct) ?? 0;
   const reasonCodes: ReasonCode[] = [];
@@ -128,7 +134,9 @@ function honeypotFromRisk(p?: Record<string, unknown>): SignalResult {
 }
 function contractRiskFromRisk(p?: Record<string, unknown>): SignalResult {
   const sec = rec(p?.security);
-  if (!sec && p?.upgradeableProxy === undefined) return UNKNOWN("contract_risk", "token-risk", "kontrat alanı yok");
+  const KNOWN = ["isMintable", "canTakeBackOwnership", "hiddenOwner", "transferPausable", "isOpenSource"];
+  const hasSec = sec && KNOWN.some((k) => sec[k] !== undefined);
+  if (!hasSec && p?.upgradeableProxy === undefined) return UNKNOWN("contract_risk", "token-risk", "no contract data");
   const ownership = rec(p?.ownership); const reasonCodes: ReasonCode[] = []; let score = 0;
   if (sec?.isMintable === true) { score += 40; reasonCodes.push("OWNER_CAN_MINT"); }
   if (sec?.canTakeBackOwnership === true) score += 40;
@@ -190,6 +198,14 @@ async function collectTokenSignals(address: string): Promise<SignalResult[]> {
 // decodeCalldata now comes from @warden/core (single source of truth).
 type Decoded = DecodedCall;
 function approvalSignal(dec: Decoded): SignalResult {
+  // Calldata we can't decode is NOT safe-by-default: a drainer can wrap an
+  // approve inside multicall / router entrypoints we don't recognize. Empty
+  // calldata (selector "0x") is a plain value transfer — nothing to approve.
+  // Anything else undecoded → `unknown` so the tx degrades to review (never clear).
+  if (dec.kind === "unknown") {
+    if (dec.selector === "0x") return { category: "approvals", status: "ok", weight: 0.30, score: 0, source: "calldata-decode", detail: "no calldata (value transfer)" };
+    return { category: "approvals", status: "unknown", weight: 0, score: 0, source: "calldata-decode", detail: `undecoded call (${dec.selector}) — cannot prove it is safe` };
+  }
   const reasonCodes: ReasonCode[] = []; let status: SignalStatus = "ok"; let score = 0; let detail = `call: ${dec.kind}`;
   const isAppr = ["approve", "increaseAllowance", "permit", "permit2Approve"].includes(dec.kind);
   if (dec.kind === "setApprovalForAll" && dec.approvedAll) { status = "fail"; score = 90; reasonCodes.push("DANGEROUS_APPROVAL"); detail = "setApprovalForAll(true) — approval over all NFTs"; }
@@ -203,7 +219,10 @@ async function txContractRisk(counterparty: string): Promise<SignalResult> {
   if (!p || (!sec && p.upgradeableProxy === undefined && p.isContract === undefined)) return UNKNOWN("contract_risk", "token-risk", r.error ?? "veri yok");
   if (p.isContract === false) return { category: "contract_risk", status: "ok", weight: 0.20, score: 5, source: "token-risk", detail: "counterparty is an EOA" };
   const reasonCodes: ReasonCode[] = []; let score = 0;
-  if (sec?.isHoneypot === true) { score += 60; reasonCodes.push("HONEYPOT_DETECTED"); }
+  // A honeypot counterparty is a hard fail (score ≥70) — interacting with it
+  // should never sit at a mild warn.
+  if (sec?.isHoneypot === true) { score += 80; reasonCodes.push("HONEYPOT_DETECTED"); }
+  if (sec?.transferPausable === true) { score += 25; reasonCodes.push("OWNER_CAN_BLACKLIST"); }
   if (p.upgradeableProxy === true) { score += 20; reasonCodes.push("PROXY_UPGRADEABLE"); }
   if (sec?.isMintable === true) { score += 20; reasonCodes.push("OWNER_CAN_MINT"); }
   if (sec?.isOpenSource === false) { score += 30; reasonCodes.push("SOURCE_UNVERIFIED"); }
@@ -231,7 +250,7 @@ async function simRpc(method: string, params: unknown[]): Promise<{ result?: unk
   } finally { clearTimeout(timer); }
 }
 
-async function simulateTx(input: { from: string; to: string; calldata?: string; value?: string }): Promise<SignalResult> {
+async function simulateTx(input: { from: string; to: string; calldata?: string; value?: string; intended?: string }): Promise<SignalResult> {
   const hasData = Boolean(input.calldata && input.calldata.length > 2 && input.calldata !== "0x");
   const value = input.value && /^0x[0-9a-fA-F]+$/.test(input.value) ? input.value : "0x0";
   const call = { from: input.from, to: input.to, data: input.calldata || "0x", value };
@@ -240,8 +259,10 @@ async function simulateTx(input: { from: string; to: string; calldata?: string; 
       simRpc("eth_getCode", [input.to, "latest"]),
       simRpc("eth_call", [call, "latest"]),
     ]);
-    // RPC itself unreachable → don't fabricate a verdict.
-    if (codeRes.error && callRes.error && /timeout|fetch|network/i.test(callRes.error.message ?? "")) {
+    // If BOTH calls error the RPC is unreachable/broken (eth_getCode almost never
+    // reverts) → degrade to unknown rather than manufacturing revert/no-code
+    // findings from a generic RPC error.
+    if (codeRes.error && callRes.error) {
       return UNKNOWN("simulation", "sim-rpc", "simulation RPC unavailable");
     }
     const code = typeof codeRes.result === "string" ? codeRes.result : "0x";
@@ -261,7 +282,7 @@ async function simulateTx(input: { from: string; to: string; calldata?: string; 
       notes.push(`simulation reverted: ${String(callRes.error.message ?? "revert").slice(0, 80)}`);
     }
     // 3) real asset-diff (Alchemy-only) — flags value/token actually leaving `from`.
-    const changes = await simAssetChanges(call).catch(() => null);
+    const changes = await simAssetChanges(call, input.intended).catch(() => null);
     if (changes && changes.outflow) {
       // An outflow to something other than the intended `to`/counterparty is the
       // classic drainer tell (approve-then-pull, delegatecall siphon).
@@ -280,18 +301,22 @@ async function simulateTx(input: { from: string; to: string; calldata?: string; 
 }
 
 /** Alchemy-only asset-change simulation. Returns null when not configured/unsupported. */
-async function simAssetChanges(call: { from: string; to: string; data: string; value: string }): Promise<{ outflow: boolean; toUnexpected: boolean; detail: string } | null> {
+async function simAssetChanges(call: { from: string; to: string; data: string; value: string }, intended?: string): Promise<{ outflow: boolean; toUnexpected: boolean; detail: string } | null> {
   if (!/alchemy/i.test(SIM_RPC)) return null;
   const res = await simRpc("alchemy_simulateAssetChanges", [{ from: call.from, to: call.to, value: call.value, data: call.data }]);
   const changes = (res.result as { changes?: Array<Record<string, unknown>> } | undefined)?.changes;
   if (!Array.isArray(changes)) return null;
-  const from = call.from.toLowerCase(), to = call.to.toLowerCase();
+  const from = call.from.toLowerCase();
+  // The legitimate recipient is the DECODED payee (transfer recipient / approval
+  // spender), not the tx `to` — for an ERC20 transfer `to` is the token contract,
+  // so comparing against `to` alone would flag every real payment. Accept both.
+  const okDest = new Set([call.to.toLowerCase(), (intended ?? "").toLowerCase()].filter(Boolean));
   for (const c of changes) {
     if (String(c.from ?? "").toLowerCase() !== from) continue; // only outflows FROM the payer
     const recipient = String(c.to ?? "").toLowerCase();
     const amt = String(c.rawAmount ?? c.amount ?? "");
     const sym = String(c.symbol ?? c.assetType ?? "asset");
-    return { outflow: true, toUnexpected: recipient !== to && recipient !== "", detail: `${amt} ${sym} → ${recipient.slice(0, 10)}…` };
+    return { outflow: true, toUnexpected: recipient !== "" && !okDest.has(recipient), detail: `${amt} ${sym} → ${recipient.slice(0, 10)}…` };
   }
   return { outflow: false, toUnexpected: false, detail: "" };
 }
@@ -367,7 +392,7 @@ export async function guardTx(input: { from: string; to: string; calldata?: stri
   const [sanctions, contract, simulation] = await Promise.all([
     bazaarGet("/api/x402/sanctions", { address: counterparty }).then((r) => sanctionsFrom(r, "counterparty")),
     txContractRisk(counterparty),
-    simulateTx({ from: input.from, to: input.to, calldata: input.calldata, value: input.value }),
+    simulateTx({ from: input.from, to: input.to, calldata: input.calldata, value: input.value, intended: dec.recipient ?? dec.spender }),
   ]);
   const signals = [approvalSignal(dec), { ...sanctions, weight: 0.10 }, contract, simulation];
   return build(

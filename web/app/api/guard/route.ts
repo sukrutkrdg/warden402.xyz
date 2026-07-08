@@ -63,6 +63,14 @@ export async function POST(req: NextRequest) {
   if (!ADDR.test(from ?? "") || !ADDR.test(to ?? "")) {
     return NextResponse.json({ error: "from ve to geçerli EVM adresi olmalı" }, { status: 400 });
   }
+  // Reject non-hex calldata/value up front (a malformed word would otherwise
+  // throw deep in the decoder and 500 the request).
+  if (calldata !== undefined && calldata !== null && !/^0x[a-fA-F0-9]*$/.test(String(calldata))) {
+    return NextResponse.json({ error: "calldata must be 0x-prefixed hex" }, { status: 400 });
+  }
+  if (value !== undefined && value !== null && value !== "" && !/^0x[a-fA-F0-9]*$/.test(String(value))) {
+    return NextResponse.json({ error: "value must be 0x-prefixed hex" }, { status: 400 });
+  }
   const gate = await guardPayGate(req); if (!gate.ok) return gate.res;
   try {
     const verdict = await guardTx({ from, to, calldata, value, chainId });

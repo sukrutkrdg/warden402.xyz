@@ -69,4 +69,23 @@ describe("decodeCalldata() — drain detection", () => {
     expect(decodeCalldata("0x").kind).toBe("unknown");
     expect(decodeCalldata(undefined).kind).toBe("unknown");
   });
+
+  it("practically-infinite approve (2^200, below near-max) is flagged unlimited", () => {
+    const amt = ((1n << 200n)).toString(16).padStart(64, "0");
+    const d = decodeCalldata("0x095ea7b3" + addr(SPENDER) + amt);
+    expect(d.kind).toBe("approve");
+    expect(d.unlimited).toBe(true); // must not require ~uint256-max to count as unlimited
+  });
+
+  it("approve just below 2^128 is not unlimited (real large allowance)", () => {
+    const amt = ((1n << 128n) - 1n).toString(16).padStart(64, "0");
+    const d = decodeCalldata("0x095ea7b3" + addr(SPENDER) + amt);
+    expect(d.unlimited).toBe(false);
+  });
+
+  it("malformed (non-hex) calldata → unknown, never throws", () => {
+    const bad = "0x095ea7b3" + addr(SPENDER) + "z".repeat(64);
+    expect(() => decodeCalldata(bad)).not.toThrow();
+    expect(decodeCalldata(bad).kind).toBe("unknown");
+  });
 });
