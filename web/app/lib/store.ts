@@ -6,6 +6,8 @@
  * Env (set on Vercel to enable persistence):
  *   KV_REST_API_URL, KV_REST_API_TOKEN   (Vercel KV / Upstash defaults)
  */
+import { logError } from "./log";
+
 type Decision = "block" | "review" | "clear";
 
 const URL = process.env.KV_REST_API_URL?.replace(/\/$/, "");
@@ -33,8 +35,17 @@ async function pipeline(commands: (string | number)[][]): Promise<unknown[]> {
     body: JSON.stringify(commands),
     cache: "no-store",
   });
-  const json = (await res.json()) as { result: unknown }[];
-  return json.map((r) => r.result);
+  // Upstash returns 429 (rate limit) / 5xx as a NON-array body. The old code did
+  // `json.map` on it and, on a shape that happened to map, surfaced `undefined`
+  // results as 0 — making a rate-limited read look like "no data / empty store".
+  // Throw instead so callers fail closed / fall back explicitly, and it's visible.
+  if (!res.ok) throw new Error(`KV HTTP ${res.status}${res.status === 429 ? " (rate limited)" : ""}`);
+  const json = await res.json();
+  if (!Array.isArray(json)) throw new Error(`KV non-array response: ${JSON.stringify(json).slice(0, 120)}`);
+  return (json as { result?: unknown; error?: string }[]).map((r) => {
+    if (r && typeof r === "object" && "error" in r && r.error) throw new Error(`KV command error: ${String(r.error).slice(0, 120)}`);
+    return r.result;
+  });
 }
 
 export interface TrackStats {
@@ -85,8 +96,10 @@ export async function readStats(): Promise<TrackStats> {
       byDecision.review = Number(r ?? 0);
       byDecision.clear = Number(c ?? 0);
       recentRaw = (recent as string[]) ?? [];
-    } catch {
-      /* fall through */
+    } catch (e) {
+      // KV read failed (e.g. rate limit) — log it so a transient outage isn't
+      // silently shown as an empty ledger (total=0), and fall back to memory.
+      logError("kv.readStats", e);
     }
   }
   if (!PERSISTENT || total === 0) {
