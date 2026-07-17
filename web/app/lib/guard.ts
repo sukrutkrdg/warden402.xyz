@@ -16,7 +16,8 @@ export type Decision = "block" | "review" | "clear";
 export type SignalStatus = "ok" | "warn" | "fail" | "unknown";
 export type SignalCategory =
   | "honeypot" | "liquidity" | "holder_concentration" | "contract_risk"
-  | "approvals" | "sanctions" | "age_activity" | "metadata" | "simulation";
+  | "approvals" | "sanctions" | "age_activity" | "metadata" | "simulation"
+  | "deployer" | "lp_lock" | "address_trust";
 
 export interface SignalResult {
   category: SignalCategory;
@@ -32,7 +33,8 @@ export type ReasonCode =
   | "OWNER_CAN_MINT" | "OWNER_CAN_BLACKLIST" | "PROXY_UPGRADEABLE"
   | "HOLDER_CONCENTRATION_HIGH" | "DANGEROUS_APPROVAL" | "SANCTIONED_ADDRESS"
   | "CONTRACT_TOO_NEW" | "SOURCE_UNVERIFIED" | "SIGNAL_UNAVAILABLE"
-  | "TX_WILL_REVERT" | "CALL_TO_NON_CONTRACT" | "UNEXPECTED_ASSET_OUTFLOW";
+  | "TX_WILL_REVERT" | "CALL_TO_NON_CONTRACT" | "UNEXPECTED_ASSET_OUTFLOW"
+  | "DEPLOYER_HIGH_RISK" | "DEPLOYER_CAUTION" | "COUNTERPARTY_ANONYMOUS";
 
 export interface Verdict {
   verdictId: string;
@@ -184,14 +186,59 @@ function sanctionsFrom(r: BazaarResult, who = "adres"): SignalResult {
     evidence: { reasonCodes: matched ? (["SANCTIONED_ADDRESS"] as ReasonCode[]) : [] } };
 }
 
+// deployer reputation → who created the token, can you trust them?
+// Bazaar returns reputationScore 0-100 (higher = MORE trustworthy). Warden's
+// convention is higher score = higher RISK, so we invert it.
+function deployerSignal(r: BazaarResult): SignalResult {
+  const p = payload(r);
+  const repScore = num(p?.reputationScore);
+  const reputation = typeof p?.reputation === "string" ? (p.reputation as string) : undefined;
+  if (repScore === undefined || !reputation || reputation === "unknown") return UNKNOWN("deployer", "deployer-rep", r.error ?? "no deployer data");
+  const score = Math.max(0, Math.min(100, 100 - repScore));
+  const reasonCodes: ReasonCode[] = []; let status: SignalStatus = "ok";
+  if (reputation === "high_risk") { status = "fail"; reasonCodes.push("DEPLOYER_HIGH_RISK"); }
+  else if (reputation === "caution") { status = "warn"; reasonCodes.push("DEPLOYER_CAUTION"); }
+  return { category: "deployer", status, weight: 0.15, score, source: "deployer-rep",
+    detail: `deployer reputation: ${reputation}`, evidence: { reasonCodes } };
+}
+
+// LP lock → is liquidity locked/burned or can the deployer pull it (rug setup)?
+// Bazaar returns rugRisk low|medium|high + lpUnlockedPercent.
+function lpLockSignal(r: BazaarResult): SignalResult {
+  const p = payload(r);
+  const rugRisk = typeof p?.rugRisk === "string" ? (p.rugRisk as string) : undefined;
+  const unlockedPct = num(p?.lpUnlockedPercent);
+  if (!rugRisk) return UNKNOWN("lp_lock", "lp-lock", r.error ?? "no lp-lock data");
+  const reasonCodes: ReasonCode[] = []; let score = 10; let status: SignalStatus = "ok";
+  if (rugRisk === "high") { score = 80; status = "fail"; reasonCodes.push("LIQUIDITY_UNLOCKED"); }
+  else if (rugRisk === "medium") { score = 45; status = "warn"; reasonCodes.push("LIQUIDITY_UNLOCKED"); }
+  return { category: "lp_lock", status, weight: 0.15, score, source: "lp-lock",
+    detail: unlockedPct !== undefined ? `LP unlocked ${unlockedPct}% (rug risk ${rugRisk})` : `LP rug risk ${rugRisk}`, evidence: { reasonCodes } };
+}
+
+// counterparty identity → Coinbase-verified / named / anonymous. Anonymous is a
+// mild signal, not a block (most legit wallets are anon); verified is reassuring.
+function addressTrustSignal(r: BazaarResult): SignalResult {
+  const p = payload(r);
+  const verdict = typeof p?.verdict === "string" ? (p.verdict as string) : undefined;
+  if (!verdict || verdict === "unknown") return UNKNOWN("address_trust", "address-trust", r.error ?? "no trust data");
+  const reasonCodes: ReasonCode[] = []; let score = 0; let status: SignalStatus = "ok";
+  if (verdict === "named") score = 5;
+  else if (verdict === "anonymous") { score = 20; status = "warn"; reasonCodes.push("COUNTERPARTY_ANONYMOUS"); }
+  return { category: "address_trust", status, weight: 0.10, score, source: "address-trust",
+    detail: `counterparty identity: ${verdict}`, evidence: { reasonCodes } };
+}
+
 async function collectTokenSignals(address: string): Promise<SignalResult[]> {
-  const [risk, pools, sanctions] = await Promise.all([
+  const [risk, pools, sanctions, deployer, lplock] = await Promise.all([
     bazaarGet("/api/x402/token-risk", { address }),
     bazaarGet("/api/x402/token-pools", { address }),
     bazaarGet("/api/x402/sanctions", { address }),
+    bazaarGet("/api/x402/deployer-rep", { address }),
+    bazaarGet("/api/x402/lp-lock", { address }),
   ]);
   const p = payload(risk);
-  return [honeypotFromRisk(p), contractRiskFromRisk(p), holdersFromRisk(p), liquidityFromPools(pools), sanctionsFrom(sanctions, "token")];
+  return [honeypotFromRisk(p), contractRiskFromRisk(p), holdersFromRisk(p), liquidityFromPools(pools), sanctionsFrom(sanctions, "token"), deployerSignal(deployer), lpLockSignal(lplock)];
 }
 
 // ── calldata decode + tx sinyalleri ───────────────────────────────
@@ -378,11 +425,12 @@ export async function guardToken(address: string, chainId = 8453): Promise<Verdi
 
 export async function guardAddress(address: string, chainId = 8453): Promise<Verdict> {
   const started = Date.now();
-  const [sanctions, contract] = await Promise.all([
+  const [sanctions, contract, trust] = await Promise.all([
     bazaarGet("/api/x402/sanctions", { address }).then((r) => sanctionsFrom(r, "address")),
     txContractRisk(address),
+    bazaarGet("/api/x402/address-trust", { address }).then(addressTrustSignal),
   ]);
-  return build({ type: "address", chainId, address }, [sanctions, contract], started);
+  return build({ type: "address", chainId, address }, [sanctions, contract, trust], started);
 }
 
 export async function guardTx(input: { from: string; to: string; calldata?: string; value?: string; chainId?: number }): Promise<Verdict> {
