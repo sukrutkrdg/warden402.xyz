@@ -18,8 +18,8 @@ const K_RECENT = "wr:recent";
 const RECENT_CAP = 100;
 
 // ── in-memory fallback ────────────────────────────────────────────
-const g = globalThis as unknown as { __wardenKV?: { counters: Map<string, number>; recent: string[]; tokens: Map<string, string> } };
-const mem = g.__wardenKV ?? (g.__wardenKV = { counters: new Map<string, number>(), recent: [] as string[], tokens: new Map<string, string>() });
+const g = globalThis as unknown as { __wardenKV?: { counters: Map<string, number>; recent: string[]; tokens: Map<string, string>; beats: Map<string, string> } };
+const mem = g.__wardenKV ?? (g.__wardenKV = { counters: new Map<string, number>(), recent: [] as string[], tokens: new Map<string, string>(), beats: new Map<string, string>() });
 
 // ── Upstash REST pipeline ─────────────────────────────────────────
 export async function kvPipeline(commands: (string | number)[][]): Promise<unknown[]> {
@@ -131,14 +131,35 @@ export async function listTokens(): Promise<TokenRec[]> {
 
 export async function setOutcome(address: string, outcome: Outcome, curLiq: number): Promise<void> {
   const addr = address.toLowerCase();
-  const list = await listTokens();
-  const rec = list.find((t) => t.address === addr);
+  // Read the single record with HGET — not a full HGETALL scan. Called once per
+  // token inside the recheck loop, so a scan here made recheck O(n²) and would
+  // eventually time out the cron as the token store grew.
+  let rec: TokenRec | undefined;
+  if (PERSISTENT) {
+    try { const [v] = await pipeline([["HGET", K_TOKENS, addr]]); if (v) rec = JSON.parse(v as string) as TokenRec; } catch { /* fall through */ }
+  }
+  if (!rec) { const m = mem.tokens.get(addr); if (m) rec = JSON.parse(m) as TokenRec; }
   if (!rec) return;
   const val = JSON.stringify({ ...rec, outcome, curLiq, checkedAt: new Date().toISOString() });
   if (PERSISTENT) {
     try { await pipeline([["HSET", K_TOKENS, addr, val]]); return; } catch { /* fall through */ }
   }
   mem.tokens.set(addr, val);
+}
+
+// ── cron heartbeats (observability) ───────────────────────────────
+// Each cron writes when it last ran and what it did, so "did scout run?" is
+// answerable without guessing from the verdict counters (which don't move when
+// the upstream returns no tokens). Surfaced in /api/track-record.
+export async function recordHeartbeat(job: string, data: Record<string, unknown>): Promise<void> {
+  const val = JSON.stringify({ at: new Date().toISOString(), ...data });
+  if (PERSISTENT) { try { await pipeline([["SET", `wr:cron:${job}`, val]]); return; } catch { /* fall */ } }
+  mem.beats.set(job, val);
+}
+export async function readHeartbeat(job: string): Promise<Record<string, unknown> | null> {
+  if (PERSISTENT) { try { const [v] = await pipeline([["GET", `wr:cron:${job}`]]); if (v) return JSON.parse(v as string); } catch { /* fall */ } }
+  const v = mem.beats.get(job);
+  return v ? JSON.parse(v) : null;
 }
 
 export interface TokenStats { checked: number; rugsCaught: number; rugsMissed: number; hitRatePct: number | null }

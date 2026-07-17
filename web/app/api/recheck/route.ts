@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listTokens, setOutcome } from "../../lib/store";
+import { listTokens, setOutcome, recordHeartbeat } from "../../lib/store";
+import { logError } from "../../lib/log";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -24,7 +25,8 @@ async function currentLiquidity(address: string): Promise<number | undefined> {
     const p = ((j.data as { data?: unknown })?.data ?? j.data) as { pools?: unknown[] } | undefined;
     const pools = Array.isArray(p?.pools) ? p!.pools : [];
     return pools.reduce<number>((s, pool) => s + (num((pool as { liquidityUsd?: unknown }).liquidityUsd) ?? 0), 0);
-  } catch {
+  } catch (e) {
+    logError("recheck.liquidity", e, { address });
     return undefined;
   }
 }
@@ -56,5 +58,6 @@ export async function GET(req: NextRequest) {
     await setOutcome(t.address, isRug ? "rugged" : "survived", cur);
     if (isRug) rugged++; else survived++;
   }
+  await recordHeartbeat("recheck", { ok: true, checked: tokens.length, rugged, survived, skipped });
   return NextResponse.json({ ok: true, checked: tokens.length, rugged, survived, skipped });
 }

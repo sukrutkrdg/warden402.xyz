@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { guardToken } from "../../lib/guard";
-import { recordToken, recordVerdict } from "../../lib/store";
+import { recordToken, recordVerdict, recordHeartbeat } from "../../lib/store";
+import { logError } from "../../lib/log";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -15,7 +16,7 @@ async function fetchAddresses(ep: string): Promise<string[]> {
       headers: { Accept: "application/json", ...(SECRET ? { "X-Warden-Internal": SECRET } : {}) },
       cache: "no-store",
     });
-    if (!r.ok) return [];
+    if (!r.ok) { logError("scout.fetch", `${ep} → HTTP ${r.status}`); return []; }
     const j = (await r.json()) as { data?: { data?: unknown } };
     const p = ((j.data as { data?: unknown })?.data ?? j.data) as Record<string, unknown> | unknown[];
     const arr = Array.isArray(p) ? p : ((p as Record<string, unknown>).tokens ?? (p as Record<string, unknown>).items ?? []) as unknown[];
@@ -25,7 +26,8 @@ async function fetchAddresses(ep: string): Promise<string[]> {
       if (a && /^0x[a-fA-F0-9]{40}$/.test(a)) out.push(a);
     }
     return out;
-  } catch {
+  } catch (e) {
+    logError("scout.fetch", e, { ep });
     return [];
   }
 }
@@ -55,7 +57,10 @@ export async function GET(req: NextRequest) {
       await recordToken(address, v.decision, v.riskScore, liq);
       byDecision[v.decision] = (byDecision[v.decision] ?? 0) + 1;
       guarded++;
-    } catch { /* skip */ }
+    } catch (e) { logError("scout.guard", e, { address }); }
   }
+  // Heartbeat: proves the cron ran even when the upstream returned no tokens
+  // (in which case `found`/`guarded` are 0 but `at` still advances).
+  await recordHeartbeat("scout", { ok: true, found: addrs.length, guarded, byDecision });
   return NextResponse.json({ ok: true, found: addrs.length, guarded, byDecision });
 }
