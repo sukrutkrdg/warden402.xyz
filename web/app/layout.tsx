@@ -147,6 +147,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </header>
         <main className="mx-auto max-w-5xl px-5 py-10">{children}</main>
         <footer className="border-t border-edge/60 py-8 text-center text-xs text-slate-500">
+          {/* Site-wide links to the pages the header nav leaves out — without
+              these, /onboard and /dashboard are orphans crawlers never reach. */}
+          <div className="mb-4 flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
+            <Link href="/" className="hover:text-warden">Guard</Link>
+            <Link href="/firewall" className="hover:text-warden">Firewall</Link>
+            <Link href="/onboard" className="hover:text-warden">Get an agent key</Link>
+            <Link href="/pricing" className="hover:text-warden">Pricing</Link>
+            <Link href="/track-record" className="hover:text-warden">Track record</Link>
+            <Link href="/dashboard" className="hover:text-warden">Fleet dashboard</Link>
+            <a href="/llms.txt" className="hover:text-warden">llms.txt</a>
+          </div>
           <div className="flex items-center justify-center gap-5">
             <a href="https://x.com/sukrutkrdg" target="_blank" rel="noreferrer" className="flex items-center gap-1.5 hover:text-warden">
               <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true">
