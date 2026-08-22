@@ -1,8 +1,12 @@
 import { OnboardForm } from "../components/OnboardForm";
 
+const DESC = "Create a firewall agent, get a key, and gate every agent action with allow / hold / deny in one call.";
+
 export const metadata = {
-  title: "Warden — Get an agent key",
-  description: "Create a firewall agent, get a key, and gate every agent action with allow / hold / deny in one call.",
+  title: "Get an agent key",
+  description: DESC,
+  alternates: { canonical: "/onboard" },
+  openGraph: { title: "Warden — Get an agent key", description: DESC, url: "/onboard" },
 };
 
 export default function Onboard() {

@@ -1,8 +1,11 @@
 import { AccountPanel } from "../components/AccountPanel";
 
 export const metadata = {
-  title: "Warden — Account",
+  title: "Account",
   description: "Sign in with your agent key to see your plan, remaining checks and recent decisions.",
+  alternates: { canonical: "/account" },
+  // Signed-in surface: nothing to index, but the links still count.
+  robots: { index: false, follow: true },
 };
 
 export default function Account() {

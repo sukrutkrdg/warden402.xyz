@@ -1,8 +1,13 @@
 import { FleetDashboard } from "../components/FleetDashboard";
 
+const DESC =
+  "Watch every agent's spend, approve or reject held actions, and enforce policy across a fleet — the real product behind the Firewall.";
+
 export const metadata = {
-  title: "Warden — Fleet dashboard",
-  description: "Watch every agent's spend, approve or reject held actions, and enforce policy across a fleet — the real product behind the Firewall.",
+  title: "Fleet dashboard",
+  description: DESC,
+  alternates: { canonical: "/dashboard" },
+  openGraph: { title: "Warden — Fleet dashboard", description: DESC, url: "/dashboard" },
 };
 
 export default function DashboardPage() {

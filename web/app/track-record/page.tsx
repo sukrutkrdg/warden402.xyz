@@ -1,5 +1,15 @@
 import { readStats, tokenStats } from "../lib/store";
 
+const DESC =
+  "Every verdict Warden has issued on Base — block / review / clear counts, live scout coverage and rug outcomes. Public, auditable evidence that the risk engine works.";
+
+export const metadata = {
+  title: "Track record",
+  description: DESC,
+  alternates: { canonical: "/track-record" },
+  openGraph: { title: "Warden — Track record", description: DESC, url: "/track-record" },
+};
+
 export const dynamic = "force-dynamic";
 
 function Stat({ label, value, accent }: { label: string; value: string | number; accent?: string }) {

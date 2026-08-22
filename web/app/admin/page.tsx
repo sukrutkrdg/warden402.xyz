@@ -1,6 +1,6 @@
 import { AdminPanel } from "../components/AdminPanel";
 
-export const metadata = { title: "Warden — Admin", robots: { index: false, follow: false } };
+export const metadata = { title: "Admin", robots: { index: false, follow: false } };
 
 export default function Admin() {
   return (

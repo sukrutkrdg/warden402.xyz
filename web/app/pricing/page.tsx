@@ -1,9 +1,14 @@
 import Link from "next/link";
 import { CryptoCheckout } from "../components/CryptoCheckout";
 
+const DESC =
+  "Guard is free for every agent. The Firewall is how teams running fleets pay: spend control, drain protection and audit as a service.";
+
 export const metadata = {
-  title: "Warden — Pricing",
-  description: "Guard is free for every agent. The Firewall is how teams running fleets pay: spend control, drain protection and audit as a service.",
+  title: "Pricing",
+  description: DESC,
+  alternates: { canonical: "/pricing" },
+  openGraph: { title: "Warden — Pricing", description: DESC, url: "/pricing" },
 };
 
 const TIERS = [

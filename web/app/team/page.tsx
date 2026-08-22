@@ -1,6 +1,12 @@
 import { TeamPanel } from "../components/TeamPanel";
 
-export const metadata = { title: "Team — Warden", description: "Manage your organization, members and agents." };
+export const metadata = {
+  title: "Team",
+  description: "Manage your organization, members and agents.",
+  alternates: { canonical: "/team" },
+  // Wallet-gated surface: no public content to index.
+  robots: { index: false, follow: true },
+};
 
 export default function TeamPage() {
   return (

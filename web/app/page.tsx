@@ -1,5 +1,34 @@
 import { GuardDemo } from "./components/GuardDemo";
 
+// Answers to the questions people actually search before wiring an agent to a
+// wallet. Rendered on the page and mirrored as FAQPage structured data.
+const FAQ = [
+  {
+    q: "What is pre-execution security for an AI agent?",
+    a: "It is a check that runs before an agent signs anything. Warden takes the token, pending transaction or counterparty address the agent is about to touch, collects independent risk signals, and returns one of three answers — block, review or clear — with the reasons behind it. Nothing is signed until that answer comes back.",
+  },
+  {
+    q: "How does Warden detect honeypot tokens and rug pulls on Base?",
+    a: "Seven signals per token: honeypot simulation, contract permissions (mint, blacklist, upgradeable proxy), holder concentration, liquidity and LP lock status, deployer reputation, sanctions screening and trading history. Any single hard failure escalates the verdict to at least review, so a token never comes back clear on partial evidence.",
+  },
+  {
+    q: "What stops an agent from approving an unlimited token allowance?",
+    a: "Warden decodes the calldata before signing — approve, increaseAllowance, Permit2 and EIP-2612 permit included — and flags any allowance at or above a practical-unlimited floor. If the calldata cannot be decoded at all, the verdict degrades to review rather than falsely clearing.",
+  },
+  {
+    q: "Does an LLM make the decision?",
+    a: "No. The decision and the risk score are fully deterministic — fixed rules over the collected signals. The language model only writes the plain-language summary of a verdict that has already been decided, so every outcome is reproducible and auditable.",
+  },
+  {
+    q: "What happens if a risk signal is unavailable?",
+    a: "It never returns a false clear. A missing or failed signal is marked unknown, the response is flagged degraded, and the verdict falls back to review at worst. Fail-safe beats fail-silent when money is about to move.",
+  },
+  {
+    q: "How do I add Warden to my agent?",
+    a: "Three ways, all free to start: the HTTP API at /api/guard, the warden402-mcp MCP server (npx -y warden402-mcp, no API key required), or the SDK. Teams running fleets add the Firewall — spend caps, allow and deny lists, drain protection and a kill switch in front of every payment.",
+  },
+];
+
 export default function Home() {
   return (
     <div className="space-y-14">
@@ -83,6 +112,36 @@ curl -X POST https://warden402.xyz/api/guard \\
             Explore the Firewall →
           </a>
         </div>
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="text-sm uppercase tracking-widest text-slate-500">Frequently asked</h2>
+        <div className="divide-y divide-edge/60 rounded-xl border border-edge bg-panel/60">
+          {FAQ.map((item) => (
+            <details key={item.q} className="group px-5 py-4">
+              <summary className="cursor-pointer list-none font-semibold text-white marker:content-none">
+                <span className="text-warden group-open:hidden">+ </span>
+                <span className="hidden text-warden group-open:inline">− </span>
+                {item.q}
+              </summary>
+              <p className="mt-3 text-sm leading-relaxed text-slate-400">{item.a}</p>
+            </details>
+          ))}
+        </div>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@type": "FAQPage",
+              mainEntity: FAQ.map((item) => ({
+                "@type": "Question",
+                name: item.q,
+                acceptedAnswer: { "@type": "Answer", text: item.a },
+              })),
+            }),
+          }}
+        />
       </section>
     </div>
   );

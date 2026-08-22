@@ -29,11 +29,29 @@ const frameEmbed = {
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
-  title: "Warden — pre-execution security for agents on Base",
+  title: {
+    default: "Warden — pre-execution security for agents on Base",
+    // Pages set a bare page name; the brand suffix is appended here.
+    template: "%s — Warden",
+  },
   description:
     "Give a token, transaction or address → block / review / clear. The pre-execution security and trust layer for agents transacting on Base.",
   applicationName: "Warden",
-  alternates: { canonical: SITE_URL },
+  keywords: [
+    "agent security",
+    "pre-execution security",
+    "Base",
+    "x402",
+    "onchain risk",
+    "token honeypot detection",
+    "rug pull detection",
+    "AI agent firewall",
+    "MCP security server",
+    "crypto transaction simulation",
+  ],
+  // Relative → resolved against metadataBase. Each page overrides with its own
+  // path; without this every page inherited the homepage canonical.
+  alternates: { canonical: "/" },
   openGraph: {
     type: "website",
     siteName: "Warden",
@@ -68,14 +86,38 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           dangerouslySetInnerHTML={{
             __html: JSON.stringify({
               "@context": "https://schema.org",
-              "@type": "SoftwareApplication",
-              name: "Warden",
-              applicationCategory: "SecurityApplication",
-              operatingSystem: "Web, API, MCP",
-              description: "Pre-execution security & trust layer for agents transacting on Base. block / review / clear before your agent signs.",
-              url: SITE_URL,
-              offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
-              author: { "@type": "Person", name: "sukrutkrdg", url: "https://x.com/sukrutkrdg" },
+              "@graph": [
+                {
+                  "@type": "Organization",
+                  "@id": `${SITE_URL}/#organization`,
+                  name: "Warden",
+                  url: SITE_URL,
+                  logo: `${SITE_URL}/brand/icon`,
+                  email: "sukrutkrdg@gmail.com",
+                  founder: { "@type": "Person", name: "sukrutkrdg", url: "https://x.com/sukrutkrdg" },
+                  sameAs: ["https://x.com/sukrutkrdg", "https://github.com/sukrutkrdg/warden402.xyz"],
+                },
+                {
+                  "@type": "WebSite",
+                  "@id": `${SITE_URL}/#website`,
+                  name: "Warden",
+                  url: SITE_URL,
+                  publisher: { "@id": `${SITE_URL}/#organization` },
+                },
+                {
+                  "@type": "SoftwareApplication",
+                  "@id": `${SITE_URL}/#software`,
+                  name: "Warden",
+                  applicationCategory: "SecurityApplication",
+                  operatingSystem: "Web, API, MCP",
+                  description:
+                    "Pre-execution security & trust layer for agents transacting on Base. block / review / clear before your agent signs.",
+                  url: SITE_URL,
+                  offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+                  publisher: { "@id": `${SITE_URL}/#organization` },
+                  author: { "@type": "Person", name: "sukrutkrdg", url: "https://x.com/sukrutkrdg" },
+                },
+              ],
             }),
           }}
         />

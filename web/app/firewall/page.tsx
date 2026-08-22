@@ -1,8 +1,13 @@
 import { FirewallPlayground } from "../components/FirewallPlayground";
 
+const DESC =
+  "Spend caps, allow/deny, drain protection and a kill switch in front of an agent's x402 payments and onchain transactions.";
+
 export const metadata = {
-  title: "Warden Firewall — policy gateway for agent value flow",
-  description: "Spend caps, allow/deny, drain protection and a kill switch in front of an agent's x402 payments and onchain transactions.",
+  title: "Firewall for agent value flow",
+  description: DESC,
+  alternates: { canonical: "/firewall" },
+  openGraph: { title: "Warden Firewall — policy gateway for agent value flow", description: DESC, url: "/firewall" },
 };
 
 export default function FirewallPage() {
