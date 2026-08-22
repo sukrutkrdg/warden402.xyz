@@ -52,6 +52,9 @@ export const metadata: Metadata = {
   // Relative → resolved against metadataBase. Each page overrides with its own
   // path; without this every page inherited the homepage canonical.
   alternates: { canonical: "/" },
+  // Bing accepts either the XML file at the root or this tag — same token.
+  // Google is verified by public/googlee028aa1b48b0bc48.html.
+  verification: { other: { "msvalidate.01": "C1B3F3F7596B8E4C293FA2A0836426A2" } },
   openGraph: {
     type: "website",
     siteName: "Warden",
