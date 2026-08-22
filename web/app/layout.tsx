@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import Script from "next/script";
 import "./globals.css";
 import { getAdsenseClient, getBaseAppId, getSiteUrl } from "./lib/site";
 import FarcasterReady from "./components/FarcasterReady";
@@ -128,11 +127,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             }),
           }}
         />
+        {/* Plain async script, not next/script: React 19 hoists this into
+            <head> of the server-rendered HTML. next/script's afterInteractive
+            injects it only after hydration, where AdSense review can miss it. */}
         {adsenseClient && (
-          <Script
-            id="adsbygoogle"
+          <script
             async
-            strategy="afterInteractive"
             crossOrigin="anonymous"
             src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${adsenseClient}`}
           />
