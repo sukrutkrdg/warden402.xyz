@@ -10,16 +10,21 @@ startCommand:
     type: object
     required: []
     properties:
+      wardenAgentKey:
+        type: string
+        title: Warden agent key
+        description: Optional agent key (wk_...) from https://warden402.xyz/onboard. Enables the firewall tools (per-agent spend policy). Guard tools work without it.
       wardenApiUrl:
         type: string
         title: Warden API URL
         default: https://warden402.xyz/api
-        description: Override the Warden API base (optional). No keys required.
+        description: Override the Warden API base (optional).
   commandFunction: |-
     (config) => ({
       command: "npx",
       args: ["-y", "warden402-mcp"],
       env: {
-        ...(config.wardenApiUrl ? { WARDEN_API_URL: config.wardenApiUrl } : {})
+        ...(config.wardenApiUrl ? { WARDEN_API_URL: config.wardenApiUrl } : {}),
+        ...(config.wardenAgentKey ? { WARDEN_AGENT_KEY: config.wardenAgentKey } : {})
       }
     })

@@ -13,10 +13,10 @@ approvals, sanctioned counterparties and low-liquidity rugs BEFORE an agent sign
 Deterministic decisions (auditable); the LLM only explains.
 
 ## For agents (free)
-- MCP server: npx -y warden402-mcp   (tools: guard_token, guard_tx, guard_address)
+- MCP server: npx -y warden402-mcp   (tools: guard_token, guard_tx, guard_address; + firewall_check, firewall_status with WARDEN_AGENT_KEY)
 - HTTP: GET https://warden402.xyz/api/guard?type=token&address=0x...
 - HTTP: POST https://warden402.xyz/api/guard  {"type":"tx","from":"0x","to":"0x","calldata":"0x.."}
-- SDK: @warden402/sdk  (warden.token / warden.tx / warden.protect)
+- SDK: npm install warden402-sdk  (warden.token / warden.tx / warden.address / warden.protect / warden.firewall)
 
 ## Firewall (for fleets)
 A policy gate in front of an agent's value flow: spend caps, allow/deny, drain

@@ -1,17 +1,17 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.sukrutkrdg/warden402-mcp",
-  "description": "Pre-execution safety for AI agents on Base. Guard a token, tx or address: block/review/clear.",
+  "description": "Pre-execution security for AI agents on Base: guard token/tx/address + per-agent spend firewall.",
   "repository": {
     "url": "https://github.com/sukrutkrdg/warden402.xyz",
     "source": "github"
   },
-  "version": "0.1.0",
+  "version": "0.2.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "warden402-mcp",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "transport": {
         "type": "stdio"
       },
@@ -21,6 +21,13 @@
           "description": "Override the Warden API base (default https://warden402.xyz/api).",
           "isRequired": false,
           "isSecret": false,
+          "format": "string"
+        },
+        {
+          "name": "WARDEN_AGENT_KEY",
+          "description": "Agent key (wk_...) from warden402.xyz/onboard. Enables firewall_check and firewall_status.",
+          "isRequired": false,
+          "isSecret": true,
           "format": "string"
         }
       ]
