@@ -13,11 +13,11 @@ const FAQ = [
   },
   {
     q: "What stops an agent from approving an unlimited token allowance?",
-    a: "Warden decodes the calldata before signing — approve, increaseAllowance, Permit2 and EIP-2612 permit included — and flags any allowance at or above a practical-unlimited floor. If the calldata cannot be decoded at all, the verdict degrades to review rather than falsely clearing.",
+    a: "Warden decodes the calldata before signing — approve, increaseAllowance, Permit2 and EIP-2612 permit included — and flags any allowance at or above a practical-unlimited floor. An unlimited approval to a plain wallet (an address with no contract code) is blocked outright, and when an approval is too broad Warden returns an exact-amount alternative to sign instead. If the calldata cannot be decoded at all, the verdict degrades to review rather than falsely clearing.",
   },
   {
     q: "Does an LLM make the decision?",
-    a: "No. The decision and the risk score are fully deterministic — fixed rules over the collected signals. The language model only writes the plain-language summary of a verdict that has already been decided, so every outcome is reproducible and auditable.",
+    a: "No. The decision, the risk score and the summary are fully deterministic — fixed rules over the collected on-chain signals, with no language model in the decision path. The same inputs always give the same verdict, so every outcome is reproducible and auditable.",
   },
   {
     q: "What happens if a risk signal is unavailable?",
@@ -25,7 +25,7 @@ const FAQ = [
   },
   {
     q: "How do I add Warden to my agent?",
-    a: "Three ways, all free to start: the HTTP API at /api/guard, the warden402-mcp MCP server (npx -y warden402-mcp, no API key required), or the SDK. Teams running fleets add the Firewall — spend caps, allow and deny lists, drain protection and a kill switch in front of every payment.",
+    a: "Three ways, all free to start: the HTTP API at /api/guard, the warden402-mcp MCP server (npx -y warden402-mcp, no API key required), or the SDK (npm install warden402-sdk). Teams running fleets add the Firewall — spend caps, allow and deny lists, drain protection and a kill switch in front of every payment.",
   },
 ];
 
@@ -41,9 +41,9 @@ export default function Home() {
         </h1>
         <p className="max-w-2xl text-slate-400">
           Warden is the pre-execution security layer for agents transacting on Base. Give it a
-          token, a pending transaction or an address — and collapse honeypots, unlimited
-          allowances, sanctions, liquidity and holder concentration into a single decision.
-          Decisions are deterministic; the LLM only explains them.
+          token, a pending transaction or an address — a live sell simulation, owner powers, drain
+          approvals, address poisoning, sanctions, liquidity and holder concentration collapse into a
+          single decision. Deterministic rules over on-chain data; no LLM in the decision path.
         </p>
       </section>
 
@@ -54,7 +54,7 @@ export default function Home() {
 
       <section className="grid gap-4 sm:grid-cols-3">
         {[
-          { t: "Deterministic decisions", d: "The decision and risk score come from fixed rules. The LLM never touches the verdict — it only writes the plain-language rationale. Fully auditable." },
+          { t: "Deterministic decisions", d: "The decision and risk score come from fixed rules over on-chain data — no LLM decides whether money moves. Same input, same verdict. Fully auditable." },
           { t: "Fails safe", d: "If a security signal can't be fetched, it never returns a false 'clear' — it degrades to 'review' at worst." },
           { t: "Provable track record", d: "Every verdict is snapshotted and its outcome re-measured. We show, in numbers, the rugs we flagged before they rugged." },
         ].map((c) => (

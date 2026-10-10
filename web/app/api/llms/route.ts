@@ -8,9 +8,13 @@ Pre-execution security & trust layer for agents transacting on Base.
 Give a token, transaction or address -> block / review / clear, before you act.
 
 ## Why
-Agents with wallets are a new attack surface. Warden stops honeypots, unlimited
-approvals, sanctioned counterparties and low-liquidity rugs BEFORE an agent signs.
-Deterministic decisions (auditable); the LLM only explains.
+Agents with wallets are a new attack surface. Warden checks BEFORE an agent signs:
+tokens you can't sell (live sell simulation), owner rug powers, wallet holder
+concentration, drain approvals (unlimited approve/permit/setApprovalForAll — blocked
+outright when the spender is a plain wallet), address poisoning, OFAC sanctions and
+sanctioned-counterparty exposure, low-liquidity rugs. When an approval is too broad
+it returns an exact-amount alternative. Deterministic rules over on-chain data, no LLM
+in the decision path; a missing critical signal can never produce "clear".
 
 ## For agents (free)
 - MCP server: npx -y warden402-mcp   (tools: guard_token, guard_tx, guard_address; + firewall_check, firewall_status with WARDEN_AGENT_KEY)

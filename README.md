@@ -28,8 +28,9 @@ wide open. Warden owns that vertical.
 
 Every endpoint returns a `Verdict` (`src/schema/verdict.ts`). Principles:
 
-1. **The LLM never touches the verdict.** `decision` and `riskScore` come from deterministic
-   rules; the LLM only writes `summary`. Auditable.
+1. **No LLM in the decision path.** `decision` and `riskScore` come from deterministic
+   rules. The deployed site (`web/`) builds `summary` from templates too; only the optional
+   Node API (`src/`) can have an LLM write `summary`, never the verdict. Auditable.
 2. **Fails safe.** If a Bazaar signal can't be fetched it becomes `unknown` → `degraded:true`
    → the verdict is `review` at worst, never a false `clear`.
 3. **Every verdict is snapshotted** (`verdictId` + signal evidence) → the track-record moat.
