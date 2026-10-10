@@ -1,12 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import "./globals.css";
-import { getAdsenseClient, getBaseAppId, getSiteUrl } from "./lib/site";
+import { getBaseAppId, getSiteUrl } from "./lib/site";
 import FarcasterReady from "./components/FarcasterReady";
 
 const SITE_URL = getSiteUrl();
 const baseAppId = getBaseAppId();
-const adsenseClient = getAdsenseClient();
 
 // Farcaster / Base App Mini App embed — renders the URL as a launchable card.
 const miniappEmbed = {
@@ -73,8 +72,6 @@ export const metadata: Metadata = {
   other: {
     // Base App verification / discovery tag (distinct from any Builder Code).
     ...(baseAppId ? { "base:app_id": baseAppId } : {}),
-    // AdSense site verification — accepted in place of the script tag alone.
-    ...(adsenseClient ? { "google-adsense-account": adsenseClient } : {}),
     // Farcaster Mini App embed (fc:frame kept for backward compatibility).
     "fc:miniapp": JSON.stringify(miniappEmbed),
     "fc:frame": JSON.stringify(frameEmbed),
@@ -127,16 +124,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             }),
           }}
         />
-        {/* Plain async script, not next/script: React 19 hoists this into
-            <head> of the server-rendered HTML. next/script's afterInteractive
-            injects it only after hydration, where AdSense review can miss it. */}
-        {adsenseClient && (
-          <script
-            async
-            crossOrigin="anonymous"
-            src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${adsenseClient}`}
-          />
-        )}
         <FarcasterReady />
         <header className="border-b border-edge/60">
           <div className="mx-auto flex max-w-5xl items-center justify-between px-5 py-4">
