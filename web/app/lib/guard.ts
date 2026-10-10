@@ -17,7 +17,8 @@ export type SignalStatus = "ok" | "warn" | "fail" | "unknown";
 export type SignalCategory =
   | "honeypot" | "liquidity" | "holder_concentration" | "contract_risk"
   | "approvals" | "sanctions" | "age_activity" | "metadata" | "simulation"
-  | "deployer" | "lp_lock" | "address_trust";
+  | "deployer" | "lp_lock" | "address_trust"
+  | "sellability" | "owner_powers" | "address_poisoning" | "sanctioned_exposure";
 
 export interface SignalResult {
   category: SignalCategory;
@@ -34,7 +35,9 @@ export type ReasonCode =
   | "HOLDER_CONCENTRATION_HIGH" | "DANGEROUS_APPROVAL" | "SANCTIONED_ADDRESS"
   | "CONTRACT_TOO_NEW" | "SOURCE_UNVERIFIED" | "SIGNAL_UNAVAILABLE"
   | "TX_WILL_REVERT" | "CALL_TO_NON_CONTRACT" | "UNEXPECTED_ASSET_OUTFLOW"
-  | "DEPLOYER_HIGH_RISK" | "DEPLOYER_CAUTION" | "COUNTERPARTY_ANONYMOUS";
+  | "DEPLOYER_HIGH_RISK" | "DEPLOYER_CAUTION" | "COUNTERPARTY_ANONYMOUS"
+  | "CANNOT_SELL" | "SELL_RESTRICTED" | "OWNER_POWERS_CRITICAL" | "OWNER_POWERS_HIGH"
+  | "ADDRESS_POISONING" | "SANCTIONED_EXPOSURE";
 
 export interface Verdict {
   verdictId: string;
@@ -51,12 +54,16 @@ export interface Verdict {
   latencyMs: number;
   decoded?: { kind: string; selector: string; unlimited: boolean; approvedAll: boolean };
   counterparty?: string;
+  /** Concrete next steps when the verdict isn't clear (e.g. an exact-amount approval to sign instead). */
+  remediation?: string[];
 }
 
 // ── config ────────────────────────────────────────────────────────
 const BLOCK_THRESHOLD = Number(process.env.WARDEN_BLOCK_THRESHOLD ?? 70);
 const REVIEW_THRESHOLD = Number(process.env.WARDEN_REVIEW_THRESHOLD ?? 35);
-const HARD_BLOCK: SignalCategory[] = ["honeypot", "sanctions"];
+// sellability fails only when the token cannot be sold at all; address_poisoning
+// fails only on a strong look-alike match — both are funds-lost-for-certain.
+const HARD_BLOCK: SignalCategory[] = ["honeypot", "sanctions", "sellability", "address_poisoning"];
 // A tx must not `clear` when we couldn't decode its calldata or run the
 // simulation — both degrade to review. (These categories only exist on the tx
 // path, so token verdicts are unaffected.)
@@ -229,16 +236,119 @@ function addressTrustSignal(r: BazaarResult): SignalResult {
     detail: `counterparty identity: ${verdict}`, evidence: { reasonCodes } };
 }
 
+// sellability → can you actually get OUT? Bazaar combines the security feed with
+// its own live transfer simulation from a real holder. canSell:false is the
+// honeypot proven by simulation, so it hard-blocks.
+function sellabilitySignal(r: BazaarResult): SignalResult {
+  const p = payload(r);
+  if (!p || p.degraded === true || typeof p.canSell !== "boolean") return UNKNOWN("sellability", "sellability", r.error ?? "sellability unconfirmed");
+  const reasons = Array.isArray(p.reasons) ? (p.reasons as unknown[]).map(String) : [];
+  if (p.canSell === false) {
+    return { category: "sellability", status: "fail", weight: 0.20, score: 95, source: "sellability",
+      detail: `cannot sell${reasons[0] ? `: ${reasons[0]}` : ""}`, evidence: { reasonCodes: ["CANNOT_SELL"] } };
+  }
+  if (p.riskLevel === "medium") {
+    return { category: "sellability", status: "warn", weight: 0.20, score: 45, source: "sellability",
+      detail: `sell restricted (${p.verdict ?? "high tax or pausable transfers"})`, evidence: { reasonCodes: ["SELL_RESTRICTED"] } };
+  }
+  return { category: "sellability", status: "ok", weight: 0.20, score: 0, source: "sellability", detail: "sellable", evidence: { reasonCodes: [] } };
+}
+
+// owner powers → what the owner can still do AFTER you buy (mint, set balances,
+// blacklist, swap the logic). The latent rug surface a clean-looking token hides.
+function ownerPowersSignal(r: BazaarResult): SignalResult {
+  const p = payload(r);
+  const verdict = typeof p?.verdict === "string" ? (p.verdict as string) : undefined;
+  const powers = Array.isArray(p?.powers) ? (p!.powers as unknown[]).map((x) => String(rec(x)?.flag ?? "")).filter(Boolean) : [];
+  const list = powers.length ? ` (${powers.slice(0, 3).join(", ")})` : "";
+  switch (verdict) {
+    case "owner_controlled_danger":
+      return { category: "owner_powers", status: "fail", weight: 0.15, score: 85, source: "owner-powers",
+        detail: `owner holds a critical power${list}`, evidence: { reasonCodes: ["OWNER_POWERS_CRITICAL"] } };
+    case "weaponizable":
+      return { category: "owner_powers", status: "warn", weight: 0.15, score: 55, source: "owner-powers",
+        detail: `owner can weaponize the token${list}`, evidence: { reasonCodes: ["OWNER_POWERS_HIGH"] } };
+    case "limited_controls":
+      return { category: "owner_powers", status: "ok", weight: 0.15, score: 15, source: "owner-powers",
+        detail: `limited owner controls${list}`, evidence: { reasonCodes: [] } };
+    case "renounced_clean":
+      return { category: "owner_powers", status: "ok", weight: 0.15, score: 0, source: "owner-powers",
+        detail: "ownership renounced, no mutable powers", evidence: { reasonCodes: [] } };
+    default:
+      return UNKNOWN("owner_powers", "owner-powers", r.error ?? "no owner-powers data");
+  }
+}
+
+// holder forensics → concentration in unlabelled WALLETS (LP/CEX/burn excluded),
+// which is the real dump risk. Raw top-10 % flags every token whose supply sits
+// in a pool or a CEX. Falls back to token-risk's raw top-10 when unavailable.
+function holdersFromForensics(r: BazaarResult, fallback: SignalResult): SignalResult {
+  const p = payload(r);
+  const level = typeof p?.concentrationRisk === "string" ? (p.concentrationRisk as string) : undefined;
+  const holderCount = num(p?.holderCount);
+  if (!level || !holderCount) return fallback; // holderCount 0 = no holder data, not "zero holders"
+  const walletPct = num(p?.walletConcentrationPercent) ?? 0;
+  const largest = num(p?.largestWalletPercent) ?? 0;
+  const flags = Array.isArray(p?.flags) ? (p!.flags as unknown[]).map(String) : [];
+  const detail = `wallets hold ~${walletPct.toFixed(1)}% (largest ${largest.toFixed(1)}%), ${holderCount.toLocaleString("en-US")} holders`;
+  const reasonCodes: ReasonCode[] = []; let score: number; let status: SignalStatus;
+  if (level === "high") { score = 75; status = "fail"; reasonCodes.push("HOLDER_CONCENTRATION_HIGH"); }
+  else if (level === "medium" || flags.includes("very_few_holders")) { score = 45; status = "warn"; reasonCodes.push("HOLDER_CONCENTRATION_HIGH"); }
+  else { score = Math.round(walletPct / 2); status = "ok"; }
+  return { category: "holder_concentration", status, weight: 0.15, score, source: "holder-forensics",
+    detail, evidence: { reasonCodes, flags } };
+}
+
 async function collectTokenSignals(address: string): Promise<SignalResult[]> {
-  const [risk, pools, sanctions, deployer, lplock] = await Promise.all([
+  const [risk, pools, sanctions, deployer, lplock, sell, owner, holders] = await Promise.all([
     bazaarGet("/api/x402/token-risk", { address }),
     bazaarGet("/api/x402/token-pools", { address }),
     bazaarGet("/api/x402/sanctions", { address }),
     bazaarGet("/api/x402/deployer-rep", { address }),
     bazaarGet("/api/x402/lp-lock", { address }),
+    bazaarGet("/api/x402/sellability", { address }),
+    bazaarGet("/api/x402/owner-powers", { address }),
+    bazaarGet("/api/x402/holder-forensics", { address }),
   ]);
   const p = payload(risk);
-  return [honeypotFromRisk(p), contractRiskFromRisk(p), holdersFromRisk(p), liquidityFromPools(pools), sanctionsFrom(sanctions, "token"), deployerSignal(deployer), lpLockSignal(lplock)];
+  return [
+    honeypotFromRisk(p), contractRiskFromRisk(p), holdersFromForensics(holders, holdersFromRisk(p)),
+    liquidityFromPools(pools), sanctionsFrom(sanctions, "token"), deployerSignal(deployer), lpLockSignal(lplock),
+    sellabilitySignal(sell), ownerPowersSignal(owner),
+  ];
+}
+
+// address poisoning → is the recipient a look-alike of someone this wallet
+// really pays (the dust copy-paste trap)? Only meaningful for outgoing transfers.
+function poisoningSignal(r: BazaarResult): SignalResult {
+  const p = payload(r);
+  const verdict = typeof p?.verdict === "string" ? (p.verdict as string) : undefined;
+  if (verdict === "poisoning_suspected")
+    return { category: "address_poisoning", status: "fail", weight: 0.30, score: 95, source: "address-poisoning",
+      detail: "recipient is a look-alike of an address this wallet pays — likely poisoned", evidence: { reasonCodes: ["ADDRESS_POISONING"] } };
+  if (verdict === "weak_resemblance")
+    return { category: "address_poisoning", status: "warn", weight: 0.30, score: 45, source: "address-poisoning",
+      detail: "recipient partially resembles a known counterparty", evidence: { reasonCodes: ["ADDRESS_POISONING"] } };
+  if (verdict === "known_counterparty" || verdict === "no_resemblance")
+    return { category: "address_poisoning", status: "ok", weight: 0.30, score: 0, source: "address-poisoning",
+      detail: verdict === "known_counterparty" ? "recipient is a known counterparty" : "no look-alike of known counterparties", evidence: { reasonCodes: [] } };
+  return UNKNOWN("address_poisoning", "address-poisoning", r.error ?? "no poisoning data");
+}
+
+// sanctioned exposure → has this address transacted with OFAC-listed addresses?
+// Taint by association, not a sanction on the address itself → warn, not block.
+function sanctionedExposureSignal(r: BazaarResult): SignalResult {
+  const p = payload(r);
+  const verdict = typeof p?.verdict === "string" ? (p.verdict as string) : undefined;
+  if (verdict === "sanctioned_exposure") {
+    const n = Array.isArray(p?.sanctionedCounterparties) ? (p!.sanctionedCounterparties as unknown[]).length : 0;
+    return { category: "sanctioned_exposure", status: "warn", weight: 0.15, score: 60, source: "sanctioned-exposure",
+      detail: `transacted with ${n || "an"} OFAC-listed address${n === 1 ? "" : "es"} (90d)`, evidence: { reasonCodes: ["SANCTIONED_EXPOSURE"] } };
+  }
+  if (verdict === "clear" || verdict === "no_activity")
+    return { category: "sanctioned_exposure", status: "ok", weight: 0.15, score: 0, source: "sanctioned-exposure",
+      detail: verdict === "clear" ? "no OFAC-listed counterparties (90d)" : "no recent USDC activity to screen", evidence: { reasonCodes: [] } };
+  return UNKNOWN("sanctioned_exposure", "sanctioned-exposure", r.error ?? "no exposure data");
 }
 
 // ── calldata decode + tx sinyalleri ───────────────────────────────
@@ -417,6 +527,24 @@ function build(target: Record<string, unknown>, signals: SignalResult[], started
   };
 }
 
+// Concrete fix for the agent, not just "no": an exact-amount approval to sign
+// instead of an unlimited one (built by Bazaar's safe-approve), or verify the payee.
+function remediationFor(dec: Decoded, token: string, approval: SignalResult, poisoning?: SignalResult): { remediation?: string[] } {
+  const out: string[] = [];
+  if (dec.kind === "setApprovalForAll" && dec.approvedAll) {
+    out.push(`Don't grant operator rights over every NFT — approve only the single tokenId the spender needs (approve(${dec.spender}, tokenId)).`);
+  } else if (approval.status !== "ok" && dec.spender && (dec.kind === "approve" || dec.kind === "increaseAllowance")) {
+    const url = `${BASE_URL}/api/x402/safe-approve?${new URLSearchParams({ token, spender: dec.spender, amount: "<exact amount>" }).toString()}`;
+    out.push(`Approve only the exact amount this action needs, never unlimited. Exact-amount calldata: ${url}`);
+  } else if (approval.status !== "ok" && dec.spender) {
+    out.push(`Sign a ${dec.kind} for the exact amount and a short deadline only — an unlimited ${dec.kind} lets ${dec.spender} pull funds at any time.`);
+  }
+  if (poisoning && poisoning.status !== "ok" && poisoning.status !== "unknown") {
+    out.push("Do not copy the recipient from transaction history. Re-check every character of the address against a trusted source.");
+  }
+  return out.length ? { remediation: out } : {};
+}
+
 // ── public API (route handler bunları çağırır) ────────────────────
 export async function guardToken(address: string, chainId = 8453): Promise<Verdict> {
   const started = Date.now();
@@ -425,27 +553,35 @@ export async function guardToken(address: string, chainId = 8453): Promise<Verdi
 
 export async function guardAddress(address: string, chainId = 8453): Promise<Verdict> {
   const started = Date.now();
-  const [sanctions, contract, trust] = await Promise.all([
+  const [sanctions, contract, trust, exposure] = await Promise.all([
     bazaarGet("/api/x402/sanctions", { address }).then((r) => sanctionsFrom(r, "address")),
     txContractRisk(address),
     bazaarGet("/api/x402/address-trust", { address }).then(addressTrustSignal),
+    bazaarGet("/api/x402/sanctioned-exposure", { wallet: address }).then(sanctionedExposureSignal),
   ]);
-  return build({ type: "address", chainId, address }, [sanctions, contract, trust], started);
+  return build({ type: "address", chainId, address }, [sanctions, contract, trust, exposure], started);
 }
 
 export async function guardTx(input: { from: string; to: string; calldata?: string; value?: string; chainId?: number }): Promise<Verdict> {
   const started = Date.now();
   const dec = decodeCalldata(input.calldata);
   const counterparty = dec.spender ?? dec.recipient ?? input.to;
-  const [sanctions, contract, simulation] = await Promise.all([
+  // Outgoing payment = ERC-20 transfer/transferFrom, or a plain value send (no calldata).
+  const payee = dec.recipient ?? (dec.selector === "0x" ? input.to : undefined);
+  const [sanctions, contract, simulation, poisoning] = await Promise.all([
     bazaarGet("/api/x402/sanctions", { address: counterparty }).then((r) => sanctionsFrom(r, "counterparty")),
     txContractRisk(counterparty),
     simulateTx({ from: input.from, to: input.to, calldata: input.calldata, value: input.value, intended: dec.recipient ?? dec.spender }),
+    payee ? bazaarGet("/api/x402/address-poisoning", { wallet: input.from, to: payee }).then(poisoningSignal) : Promise.resolve(undefined),
   ]);
-  const signals = [approvalSignal(dec), { ...sanctions, weight: 0.10 }, contract, simulation];
+  const approval = approvalSignal(dec);
+  const signals = [approval, { ...sanctions, weight: 0.10 }, contract, simulation, ...(poisoning ? [poisoning] : [])];
   return build(
     { type: "tx", chainId: input.chainId ?? 8453, from: input.from, to: input.to, calldata: input.calldata, value: input.value },
     signals, started,
-    { decoded: { kind: dec.kind, selector: dec.selector, unlimited: dec.unlimited ?? false, approvedAll: dec.approvedAll ?? false }, counterparty },
+    {
+      decoded: { kind: dec.kind, selector: dec.selector, unlimited: dec.unlimited ?? false, approvedAll: dec.approvedAll ?? false }, counterparty,
+      ...remediationFor(dec, input.to, approval, poisoning),
+    },
   );
 }
