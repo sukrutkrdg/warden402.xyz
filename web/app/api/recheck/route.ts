@@ -20,7 +20,15 @@ async function currentLiquidity(address: string): Promise<number | undefined> {
       headers: { Accept: "application/json", ...(SECRET ? { "X-Warden-Internal": SECRET } : {}) },
       cache: "no-store",
     });
-    if (!r.ok) return undefined;
+    if (!r.ok) {
+      // Bazaar answers 400 "No pools found" once every pool is gone — that is
+      // the rug itself (liquidity 0), not missing data. Other errors stay a skip.
+      if (r.status === 400) {
+        const e = (await r.json().catch(() => ({}))) as { error?: unknown };
+        if (typeof e.error === "string" && /no pools/i.test(e.error)) return 0;
+      }
+      return undefined;
+    }
     const j = (await r.json()) as { data?: { data?: unknown } };
     const p = ((j.data as { data?: unknown })?.data ?? j.data) as { pools?: unknown[] } | undefined;
     const pools = Array.isArray(p?.pools) ? p!.pools : [];
