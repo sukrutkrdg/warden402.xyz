@@ -7,8 +7,10 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "noEmit": true,
+    "declaration": true,
+    "outDir": "dist",
+    "rootDir": "src",
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/index.ts"]
+  "include": ["src"]
 }

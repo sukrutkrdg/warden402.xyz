@@ -20,7 +20,7 @@ wide open. Warden owns that vertical.
 |------|------|
 | `web/` | **The website** (warden402.xyz) — landing + live demo + track-record. Runs the guard **in-process**, so it deploys as a single Vercel project. |
 | `src/` | Standalone **Hono Guard API** (same logic) — for agents/SDK/MCP and a persistent-ledger host. |
-| `sdk/` | `@warden402/sdk` — client + `enforce`/`assertSafe` gate + LangChain tools. |
+| `sdk/` | `warden402-sdk` — guard + firewall client (fail-closed), `protect()` middleware, holds, LangChain tools. |
 | `mcp/` | `warden402-mcp` — stdio MCP server exposing `guard_token` / `guard_tx` / `guard_address`. |
 | `scripts/` | `smoke.ts` (offline decision tests), `probe.ts` (calibration), `recheck.ts` (outcome re-checker). |
 

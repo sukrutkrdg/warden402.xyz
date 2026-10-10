@@ -1,67 +1,100 @@
-# @warden402/sdk
+# warden402-sdk
 
-Ajanlar için **pre-execution güvenlik**. Base'de herhangi bir on-chain aksiyondan önce
-bir token / işlem / adresi `block · review · clear` ile sarmala.
+**Pre-execution security for agents on Base.** Before your agent buys a token,
+signs a transaction or pays someone, ask Warden: `block · review · clear` with
+the reasons — and enforce a per-agent spending policy (`allow · hold · deny`).
+
+```bash
+npm install warden402-sdk
+```
+
+## Guard — is this safe?
+
+No key needed (free daily quota per IP, then x402 pay-per-call).
 
 ```ts
-import { Warden, WardenBlockedError } from "@warden402/sdk";
+import { Warden } from "warden402-sdk";
 
-const warden = new Warden(); // varsayılan: https://warden402.xyz/api
+const warden = new Warden();
 
-// 1) Token guard (al-sat öncesi)
+// Token, before buying/selling: can it be sold, honeypot, tax, owner powers,
+// liquidity, holder concentration, deployer reputation, OFAC
 const v = await warden.token("0xTOKEN");
 if (v.decision === "block") throw new Error(v.summary);
 
-// 2) Tek satır kapı — block ise fırlatır
-await warden.assertSafe(() => warden.token("0xTOKEN"));
-
-// 3) Pre-sign (bekleyen işlem)
+// Pending transaction, before signing: unlimited approve / permit /
+// setApprovalForAll, simulation, counterparty, address poisoning
 const tv = await warden.tx({ from, to, calldata });
-if (tv.decoded?.unlimited) console.warn("sınırsız allowance!");
+if (tv.decision !== "clear") console.log(tv.reasons, tv.remediation);
+
+// Counterparty address: OFAC, sanctioned-counterparty exposure, contract risk
+const av = await warden.address("0xCOUNTERPARTY");
+
+// One-line gate — throws WardenBlockedError on block
+await warden.assertSafe(() => warden.token("0xTOKEN"));
 ```
 
-## Seçenekler
+**Fail-closed:** if Warden can't produce a verdict (quota exhausted, bad input,
+network error, timeout) the SDK throws `WardenError` — it never returns
+something your code could read as "safe".
+
+## Firewall — is this allowed for *this* agent?
+
+Get an agent key at **https://warden402.xyz/onboard**. Each agent has its own
+policy: per-call / hourly / daily spend caps, allow & deny lists, unlimited
+approvals banned, first payment to a new counterparty held for a human.
 
 ```ts
-new Warden({
-  baseUrl: "http://localhost:8787", // lokal Hono API
-  blockOn: ["block", "review"],     // review'i de fırlatma say
-  timeoutMs: 8000,
-});
-```
+import { Warden, FirewallBlockedError } from "warden402-sdk";
 
-## Middleware — guard before you sign
+const warden = new Warden({ agentKey: process.env.WARDEN_AGENT_KEY });
 
-Wrap any send/sign so it only runs when the Firewall says `allow`:
-
-```ts
-import { Warden, FirewallBlockedError } from "@warden402/sdk";
-const warden = new Warden({ baseUrl: "https://your-api" });
-
+// Wrap the send: it only runs on "allow"
 try {
   const receipt = await warden.protect(
-    { kind: "tx", to, from, calldata },
-    "agent-key",
-    () => wallet.sendTransaction(tx),   // runs only on ALLOW
+    { kind: "tx", to, from, calldata },          // or { to, amountUsd: 5 } for a payment
+    () => wallet.sendTransaction(tx),
   );
 } catch (e) {
   if (e instanceof FirewallBlockedError) {
-    // e.result.decision is "hold" | "deny", e.result.reasons explains why
+    // e.result.decision: "hold" (waiting for approval) | "deny"
+    // e.result.reasons:  e.g. ["NEW_COUNTERPARTY"], ["UNLIMITED_APPROVAL"], ["OVER_PER_CALL"]
   }
 }
+
+// Or check without executing
+const r = await warden.firewall({ to: "0xPAYEE", amountUsd: 5 });
+
+// Human-in-the-loop for held actions (also in the dashboard at /account)
+for (const h of await warden.holds()) await warden.resolveHold(h.holdId, "approve");
+
+// Plan and quota
+await warden.state(); // { plan, checksUsed, checksRemaining, ... }
 ```
 
 ## LangChain
 
 ```ts
-import { wardenTools } from "@warden402/sdk/langchain";
-const tools = await wardenTools();   // [guard_token, guard_address, guard_tx]
-// agent executor'a ekle — ajan trade/sign'dan önce çağırır
+import { wardenTools } from "warden402-sdk/langchain";
+
+const tools = await wardenTools();                          // guard_token, guard_address, guard_tx
+const tools = await wardenTools({ agentKey: "wk_..." });    // + firewall_check
 ```
 
-`@langchain/core` opsiyonel bir peer dependency'dir.
+`@langchain/core` and `zod` are optional peer dependencies.
 
-## Verdict şekli
+## Options
 
-`{ decision, riskScore, confidence, reasons[], signals[], summary, degraded, ... }`
-Kararlar deterministiktir; LLM yalnızca `summary`'yi üretir.
+```ts
+new Warden({
+  baseUrl: "https://warden402.xyz/api", // default
+  agentKey: "wk_...",                   // firewall / holds / state
+  blockOn: ["block", "review"],         // what enforce()/assertSafe() throw on (default ["block"])
+  headers: { "x-payment": "..." },      // e.g. an x402 payment header after the free quota
+  timeoutMs: 10000,
+});
+```
+
+Also available as an MCP server: `npx -y warden402-mcp`.
+
+MIT · https://warden402.xyz

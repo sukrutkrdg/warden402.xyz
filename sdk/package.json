@@ -1,24 +1,25 @@
 {
-  "name": "@warden402/sdk",
-  "version": "0.1.0",
-  "description": "Warden SDK — pre-execution safety checks for agents on Base. Wrap any token/tx/address in block·review·clear before you act.",
+  "name": "warden402-sdk",
+  "version": "0.2.0",
+  "description": "Pre-execution security for agents on Base: check a token, transaction or address (block / review / clear) and enforce per-agent spending policy before you act.",
   "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./langchain": "./src/langchain.ts"
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./langchain": { "types": "./dist/langchain.d.ts", "import": "./dist/langchain.js" }
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "build": "tsc -p .",
+    "typecheck": "tsc -p . --noEmit",
+    "prepublishOnly": "npm run build"
   },
-  "files": ["src", "README.md"],
+  "files": ["dist", "README.md"],
   "homepage": "https://warden402.xyz",
+  "repository": { "type": "git", "url": "git+https://github.com/sukrutkrdg/warden402.xyz.git", "directory": "sdk" },
   "license": "MIT",
-  "peerDependencies": {
-    "@langchain/core": "*"
-  },
-  "peerDependenciesMeta": {
-    "@langchain/core": { "optional": true }
-  }
+  "engines": { "node": ">=18" },
+  "keywords": ["base", "x402", "agent", "security", "web3", "honeypot", "approval", "firewall", "langchain", "warden"],
+  "peerDependencies": { "@langchain/core": "*", "zod": "*" },
+  "peerDependenciesMeta": { "@langchain/core": { "optional": true }, "zod": { "optional": true } }
 }
