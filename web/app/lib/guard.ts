@@ -18,7 +18,8 @@ export type SignalCategory =
   | "honeypot" | "liquidity" | "holder_concentration" | "contract_risk"
   | "approvals" | "sanctions" | "age_activity" | "metadata" | "simulation"
   | "deployer" | "lp_lock" | "address_trust"
-  | "sellability" | "owner_powers" | "address_poisoning" | "sanctioned_exposure";
+  | "sellability" | "owner_powers" | "address_poisoning" | "sanctioned_exposure"
+  | "approval_target";
 
 export interface SignalResult {
   category: SignalCategory;
@@ -37,7 +38,7 @@ export type ReasonCode =
   | "TX_WILL_REVERT" | "CALL_TO_NON_CONTRACT" | "UNEXPECTED_ASSET_OUTFLOW"
   | "DEPLOYER_HIGH_RISK" | "DEPLOYER_CAUTION" | "COUNTERPARTY_ANONYMOUS"
   | "CANNOT_SELL" | "SELL_RESTRICTED" | "OWNER_POWERS_CRITICAL" | "OWNER_POWERS_HIGH"
-  | "ADDRESS_POISONING" | "SANCTIONED_EXPOSURE";
+  | "ADDRESS_POISONING" | "SANCTIONED_EXPOSURE" | "APPROVAL_TO_EOA";
 
 export interface Verdict {
   verdictId: string;
@@ -63,7 +64,8 @@ const BLOCK_THRESHOLD = Number(process.env.WARDEN_BLOCK_THRESHOLD ?? 70);
 const REVIEW_THRESHOLD = Number(process.env.WARDEN_REVIEW_THRESHOLD ?? 35);
 // sellability fails only when the token cannot be sold at all; address_poisoning
 // fails only on a strong look-alike match — both are funds-lost-for-certain.
-const HARD_BLOCK: SignalCategory[] = ["honeypot", "sanctions", "sellability", "address_poisoning"];
+// approval_target fails only for an unlimited approval to an address with no code.
+const HARD_BLOCK: SignalCategory[] = ["honeypot", "sanctions", "sellability", "address_poisoning", "approval_target"];
 // A tx must not `clear` when we couldn't decode its calldata or run the
 // simulation — both degrade to review. (These categories only exist on the tx
 // path, so token verdicts are unaffected.)
@@ -388,6 +390,31 @@ async function txContractRisk(counterparty: string): Promise<SignalResult> {
   return { category: "contract_risk", status, weight: 0.20, score, source: "token-risk", detail: reasonCodes.length ? "contract risk flags" : "contract clean", evidence: { reasonCodes } };
 }
 
+// Who receives the allowance? Legit unlimited approvals go to contracts (DEX
+// routers, Permit2, vaults). An unlimited approval or setApprovalForAll to a
+// plain wallet (no code) is the classic phishing drain — nothing legitimate
+// needs that, so it hard-blocks. A limited approval to a wallet is a warn (it
+// pairs with the approvals warn → review). EIP-7702 delegated wallets carry code
+// and are left to the normal path. Returns undefined when there's nothing to check.
+async function approvalTargetSignal(dec: Decoded): Promise<SignalResult | undefined> {
+  const broad = (dec.unlimited === true) || (dec.kind === "setApprovalForAll" && dec.approvedAll === true);
+  const limited = !broad && ["approve", "increaseAllowance", "permit", "permit2Approve"].includes(dec.kind) && (dec.amount ?? 0n) > 0n;
+  if ((!broad && !limited) || !dec.spender) return undefined;
+  try {
+    const r = await simRpc("eth_getCode", [dec.spender, "latest"]);
+    if (r.error || typeof r.result !== "string") return UNKNOWN("approval_target", "sim-rpc", "could not read spender code");
+    const isEoa = r.result === "0x" || r.result.length <= 2;
+    if (isEoa && limited) return { category: "approval_target", status: "warn", weight: 0.30, score: 60, source: "sim-rpc",
+      detail: `allowance to a plain wallet (${dec.spender.slice(0, 10)}…) — not a contract`, evidence: { reasonCodes: ["APPROVAL_TO_EOA"] } };
+    if (isEoa) return { category: "approval_target", status: "fail", weight: 0.30, score: 95, source: "sim-rpc",
+      detail: `${dec.kind === "setApprovalForAll" ? "operator rights over all NFTs" : "unlimited allowance"} to a plain wallet (${dec.spender.slice(0, 10)}…) — not a contract`,
+      evidence: { reasonCodes: ["APPROVAL_TO_EOA"] } };
+    return { category: "approval_target", status: "ok", weight: 0.30, score: 0, source: "sim-rpc", detail: "spender is a contract", evidence: { reasonCodes: [] } };
+  } catch {
+    return UNKNOWN("approval_target", "sim-rpc", "could not read spender code");
+  }
+}
+
 // ── pre-execution simulation (Base RPC) ───────────────────────────
 // Runs the tx through the node WITHOUT sending it: catches reverts, calls to a
 // codeless address, and — when an Alchemy RPC is configured — real asset moves.
@@ -568,14 +595,15 @@ export async function guardTx(input: { from: string; to: string; calldata?: stri
   const counterparty = dec.spender ?? dec.recipient ?? input.to;
   // Outgoing payment = ERC-20 transfer/transferFrom, or a plain value send (no calldata).
   const payee = dec.recipient ?? (dec.selector === "0x" ? input.to : undefined);
-  const [sanctions, contract, simulation, poisoning] = await Promise.all([
+  const [sanctions, contract, simulation, poisoning, target] = await Promise.all([
     bazaarGet("/api/x402/sanctions", { address: counterparty }).then((r) => sanctionsFrom(r, "counterparty")),
     txContractRisk(counterparty),
     simulateTx({ from: input.from, to: input.to, calldata: input.calldata, value: input.value, intended: dec.recipient ?? dec.spender }),
     payee ? bazaarGet("/api/x402/address-poisoning", { wallet: input.from, to: payee }).then(poisoningSignal) : Promise.resolve(undefined),
+    approvalTargetSignal(dec),
   ]);
   const approval = approvalSignal(dec);
-  const signals = [approval, { ...sanctions, weight: 0.10 }, contract, simulation, ...(poisoning ? [poisoning] : [])];
+  const signals = [approval, { ...sanctions, weight: 0.10 }, contract, simulation, ...(poisoning ? [poisoning] : []), ...(target ? [target] : [])];
   return build(
     { type: "tx", chainId: input.chainId ?? 8453, from: input.from, to: input.to, calldata: input.calldata, value: input.value },
     signals, started,

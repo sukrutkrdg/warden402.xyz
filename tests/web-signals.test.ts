@@ -40,3 +40,15 @@ describe("web signals — decide()", () => {
     expect(d.decision).toBe("clear");
   });
 });
+
+describe("web signals — approval target", () => {
+  it("unlimited approval to a plain wallet hard-blocks", () => {
+    const d = decide([sig("approvals", "fail", 0.3, 80, ["DANGEROUS_APPROVAL"]), sig("approval_target", "fail", 0.3, 95, ["APPROVAL_TO_EOA"]), sig("sanctions", "ok", 0.1, 0)]);
+    expect(d.decision).toBe("block");
+    expect(d.reasons).toContain("APPROVAL_TO_EOA");
+  });
+  it("unlimited approval to a contract stays review", () => {
+    const d = decide([sig("approvals", "fail", 0.3, 80, ["DANGEROUS_APPROVAL"]), sig("approval_target", "ok", 0.3, 0), sig("sanctions", "ok", 0.1, 0), sig("simulation", "ok", 0.2, 0)]);
+    expect(d.decision).toBe("review");
+  });
+});

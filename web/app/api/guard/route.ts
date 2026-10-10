@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
   const address = (req.nextUrl.searchParams.get("address") ?? "").trim();
   const chainId = Number(req.nextUrl.searchParams.get("chainId") ?? 8453);
   if (!ADDR.test(address)) {
-    return NextResponse.json({ error: "Geçerli bir EVM adresi gir (0x…40 hex)" }, { status: 400 });
+    return NextResponse.json({ error: "address must be a valid EVM address (0x + 40 hex)" }, { status: 400 });
   }
   const gate = await guardPayGate(req); if (!gate.ok) return gate.res;
   try {
@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const { from, to, calldata, value, chainId } = body ?? {};
   if (!ADDR.test(from ?? "") || !ADDR.test(to ?? "")) {
-    return NextResponse.json({ error: "from ve to geçerli EVM adresi olmalı" }, { status: 400 });
+    return NextResponse.json({ error: "from and to must be valid EVM addresses (0x + 40 hex)" }, { status: 400 });
   }
   // Reject non-hex calldata/value up front (a malformed word would otherwise
   // throw deep in the decoder and 500 the request).
